@@ -1,0 +1,9 @@
+# Builds the Valles image and pushes it to Container Registry.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/valles-ems:latest', '.']
+images:
+  - 'gcr.io/$PROJECT_ID/valles-ems:latest'
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: '900s'
