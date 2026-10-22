@@ -1,0 +1,92 @@
+name: Deploy Valles to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: easy-ems-507406
+  REGION: asia-south1
+  SERVICE: valles-ems
+  CLOUD_SQL_INSTANCE: easy-ems-507406:asia-south1:ems-postgres
+  OAUTH_CLIENT_ID: 870827159813-4g2i299mv9qduqpmju40mpr5f63uvgns.apps.googleusercontent.com
+  # Comma-separated Google accounts allowed to use Valles. Add people here, push, and it redeploys.
+  ALLOWED_EMAILS: vallesindia@gmail.com
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: valles_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: API tests
+        run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/valles_test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure project
+        run: |
+          gcloud config set project ${{ env.PROJECT_ID }}
+          gcloud config set run/region ${{ env.REGION }}
+
+      - name: Build via Cloud Build
+        run: gcloud builds submit --config cloudbuild.yaml --timeout=15m .
+
+      - name: Write runtime settings
+        # A file avoids shell quoting problems with the commas in ALLOWED_EMAILS.
+        run: |
+          cat > "$RUNNER_TEMP/env.yaml" <<YAML
+          NODE_ENV: "production"
+          DB_HOST: "/cloudsql/${{ env.CLOUD_SQL_INSTANCE }}"
+          DB_NAME: "valles"
+          DB_USER: "valles_app"
+          GOOGLE_OAUTH_CLIENT_ID: "${{ env.OAUTH_CLIENT_ID }}"
+          ALLOWED_EMAILS: "${{ env.ALLOWED_EMAILS }}"
+          YAML
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE }} \
+            --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 --memory 512Mi --cpu 1 \
+            --min-instances 0 --max-instances 3 \
+            --timeout 300 --concurrency 80 \
+            --add-cloudsql-instances ${{ env.CLOUD_SQL_INSTANCE }} \
+            --env-vars-file "$RUNNER_TEMP/env.yaml" \
+            --update-secrets "DB_PASSWORD=valles-db-password:latest"
+
+      - name: Health check
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} --region ${{ env.REGION }} --format="value(status.url)")
+          sleep 20
+          curl -f -s "$URL/readyz" > /dev/null && echo "OK" || exit 1
