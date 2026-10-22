@@ -211,6 +211,19 @@
     .payslip-title{margin:6px 0;}
     .no-print{display:none !important;}
   }
+
+  /* Login gate + user management */
+  #loginGate{position:fixed;inset:0;z-index:40;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+  .gate-card{background:var(--card);border:1px solid var(--rule);border-radius:18px;box-shadow:0 8px 40px rgba(91,108,249,.15);padding:34px;width:100%;max-width:380px;text-align:center;}
+  .gate-card .seal{width:56px;height:56px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:24px;}
+  .gate-sub{color:var(--muted);font-size:12.5px;margin:2px 0 16px;}
+  .gate-link{color:var(--accent);font-size:12px;}
+  .gate-error{display:none;background:var(--bad-soft);border:1px solid #F6C9C6;border-radius:8px;padding:8px 12px;font-size:12.5px;color:var(--bad);margin:0 0 12px;text-align:center;}
+  .pin-input{text-align:center;font-size:20px;letter-spacing:8px;font-weight:700;}
+  .um-matrix th,.um-matrix td{text-align:center;padding:7px 10px;}
+  .um-matrix .um-sub td{background:#FAFBFD;font-size:12.5px;}
+  .um-matrix .um-edit-row td{border-top:2px solid var(--rule);background:var(--accent-soft);}
+  .um-matrix input[type=checkbox]{width:auto;}
 </style>
 </head>
 <body>
@@ -236,6 +249,7 @@
     </nav>
     <div id="navPresenceBadge" class="no-print" style="margin-left:auto;padding-left:8px;white-space:nowrap;"></div>
     <div id="navDriveBadge" class="no-print" style="padding-left:12px;white-space:nowrap;"></div>
+    <div id="navUserBadge" class="no-print" style="padding-left:12px;white-space:nowrap;"></div>
   </div>
 </div>
 
@@ -247,6 +261,7 @@
     </div>
     <div class="btn-row no-print" id="topActions"></div>
   </div>
+  <div id="roBanner" class="no-print" style="display:none;background:#FDF0DC;color:#B5720A;border:1px solid #F4DDB4;border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:12.5px;font-weight:600;">View-only access — you can look at everything your role allows, but changes cannot be saved.</div>
   <div id="content"></div>
   <footer class="app-footer no-print">
     <div>&copy; 2026 EASY MS &ndash; Management System. All rights reserved.</div>
@@ -302,10 +317,14 @@ async function getJSON(key, def){
   if(key==='documents') return LOCAL.documents!=null ? LOCAL.documents : def;
   if(key==='transactions') return LOCAL.transactions!=null ? LOCAL.transactions : def;
   if(key==='expenses') return LOCAL.expenses!=null ? LOCAL.expenses : def;
+  if(key==='reimbursements') return LOCAL.reimbursements!=null ? LOCAL.reimbursements : def;
+  if(key==='users') return LOCAL.users!=null ? LOCAL.users : def;
+  if(key==='access') return LOCAL.access!=null ? LOCAL.access : def;
   if(key.indexOf('compliance:')===0){ const v = LOCAL.compliance[key.slice(11)]; return v!=null ? v : def; }
   return def;
 }
 async function setJSON(key, value){
+  if(isReadOnly()){ toast('View-only access — changes are not saved.', true); return false; }
   ensureLocal();
   if(key==='org-profile') LOCAL.org = value;
   else if(key==='employees') LOCAL.employees = value;
@@ -314,6 +333,9 @@ async function setJSON(key, value){
   else if(key==='documents') LOCAL.documents = value;
   else if(key==='transactions') LOCAL.transactions = value;
   else if(key==='expenses') LOCAL.expenses = value;
+  else if(key==='reimbursements') LOCAL.reimbursements = value;
+  else if(key==='users') LOCAL.users = value;
+  else if(key==='access') LOCAL.access = value;
   else if(key.indexOf('compliance:')===0){ LOCAL.compliance[key.slice(11)] = value; }
   try{ localStorage.setItem(LS_KEY, JSON.stringify(LOCAL)); }
   catch(e){ toast('Local save failed — browser storage may be full. Try removing large documents.', true); return false; }
@@ -325,12 +347,12 @@ function buildPayload(){
   ensureLocal();
   return { app:'Valles Management System', version:2, savedAt:new Date().toISOString(),
     org:ORG, employees:EMPLOYEES, payslips:PAYSLIPS, compliance:COMPLIANCE,
-    parties:PARTIES, documents:COMPANY_DOCS, transactions:TRANSACTIONS, expenses:EXPENSES, reimbursements:REIMBURSEMENTS,
+    parties:PARTIES, documents:COMPANY_DOCS, transactions:TRANSACTIONS, expenses:EXPENSES, reimbursements:REIMBURSEMENTS, users:USERS, access:ACCESS,
     presence:LOCAL.presence, tombstones:LOCAL.tombstones };
 }
 
 /* ============================= STATE ============================= */
-let ORG = null, EMPLOYEES = [], PAYSLIPS = [], COMPLIANCE = {}, PARTIES = [], COMPANY_DOCS = [], TRANSACTIONS = [], EXPENSES = [], REIMBURSEMENTS = [];
+let ORG = null, EMPLOYEES = [], PAYSLIPS = [], COMPLIANCE = {}, PARTIES = [], COMPANY_DOCS = [], TRANSACTIONS = [], EXPENSES = [], REIMBURSEMENTS = [], USERS = [], ACCESS = [];
 let settingsUnlocked = false;
 let activeTab = 'dashboard';
 
@@ -550,6 +572,8 @@ async function loadAll(){
   TRANSACTIONS = await getJSON('transactions', []);
   EXPENSES = await getJSON('expenses', []);
   REIMBURSEMENTS = await getJSON('reimbursements', []);
+  USERS = await getJSON('users', []);
+  ACCESS = await getJSON('access', []);
   refreshBrand();
 }
 async function saveOrg(){ return await setJSON('org-profile', ORG); }
@@ -557,6 +581,16 @@ async function saveReimbursements(){
   const remote = await pullRemotePayload();
   REIMBURSEMENTS = mergeCollection('reimbursements', REIMBURSEMENTS, remote && remote.reimbursements, remote && remote.tombstones && remote.tombstones.reimbursements);
   return await setJSON('reimbursements', REIMBURSEMENTS);
+}
+async function saveUsers(){
+  const remote = await pullRemotePayload();
+  USERS = mergeCollection('users', USERS, remote && remote.users, remote && remote.tombstones && remote.tombstones.users);
+  return await setJSON('users', USERS);
+}
+async function saveAccess(){
+  const remote = await pullRemotePayload();
+  ACCESS = mergeCollection('access', ACCESS, remote && remote.access, remote && remote.tombstones && remote.tombstones.access);
+  return await setJSON('access', ACCESS);
 }
 async function saveTransactions(){
   const remote = await pullRemotePayload();
@@ -608,11 +642,555 @@ function refreshBrand(){
   else { logoEl.textContent = (ORG.companyName||'V').trim().charAt(0).toUpperCase(); }
 }
 
+/* ============================= USERS, LOGIN & PERMISSIONS ============================= */
+/* PIN login in the same style as IMSE EASY EMS: pick your name, enter a 6-digit PIN. Users and the
+   role-permission matrix are saved and synced with the rest of the data (collections `users` and
+   `access`), merged per record by _rev like everything else.
+   NOTE: this is an app-level sign-in (who is using it, and what they may open). The data-level
+   protection is the Google sign-in + allowed-accounts list on the server. */
+const ROLES = ['Admin','Accounts','HR','View Only','CA'];
+const ACCESS_MODULES = [
+  { key:'dashboard',     label:'Dashboard' },
+  { key:'transactions',  label:'Transactions' },
+  { key:'staff',         label:'Staff', subs:[ { key:'staff.details', label:'Staff Details' }, { key:'staff.payroll', label:'Payslip & Compliance' } ] },
+  { key:'expenses',      label:'Bills & Expenses' },
+  { key:'taxcompliance', label:'Tax Compliance' },
+  { key:'parties',       label:'Parties' },
+  { key:'documents',     label:'Documents' }
+];
+const DEFAULT_ROLE_PERMS = {
+  'Accounts':  { edit:true,  modules:['dashboard','transactions','expenses','taxcompliance','parties','documents'] },
+  'HR':        { edit:true,  modules:['dashboard','staff','staff.details','staff.payroll','documents'] },
+  'View Only': { edit:false, modules:['dashboard','transactions','expenses','taxcompliance','parties','documents'] },
+  'CA':        { edit:false, modules:['dashboard','transactions','expenses','taxcompliance'] }
+};
+const DEFAULT_PIN_DAYS = 90;
+const MAX_PIN_FAILS = 5;
+const SESSION_KEY = 'vallesSession';
+let SESSION = null;
+let loginDataReady = false;
+let loginLoadError = null;
+let gateView = 'login';
+let gateSig = '';
+
+function rolePerms(){
+  const rec = ACCESS.find(a=>a.id==='rolePerms');
+  const stored = (rec && rec.perms) || {};
+  const out = {};
+  Object.keys(DEFAULT_ROLE_PERMS).forEach(r=>{ out[r] = stored[r] ? stored[r] : DEFAULT_ROLE_PERMS[r]; });
+  return out;
+}
+function can(key){
+  if(!SESSION) return false;
+  if(key==='settings') return SESSION.role==='Admin';
+  if(SESSION.role==='Admin') return true;
+  const p = rolePerms()[SESSION.role]; if(!p) return false;
+  if(key.indexOf('.')>0) return p.modules.includes(key.split('.')[0]) && p.modules.includes(key);
+  return p.modules.includes(key);
+}
+function canEdit(){
+  if(!SESSION) return false;
+  if(SESSION.role==='Admin') return true;
+  const p = rolePerms()[SESSION.role];
+  return !!(p && p.edit);
+}
+function isReadOnly(){ return !!SESSION && !canEdit(); }
+function firstAllowedTab(){
+  return ['dashboard','transactions','staff','expenses','taxcompliance','parties','documents','settings'].find(t=>can(t)) || null;
+}
+async function hashPin(userId, pin){ return sha256('VALLES_PIN_'+userId+'_'+pin); }
+function activeAdmins(){ return USERS.filter(u=>u.role==='Admin' && u.active!==false); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function addDaysStr(days){ return new Date(Date.now()+days*86400000).toISOString().slice(0,10); }
+function pinStatus(u){
+  if(!u.pinHash) return { cls:'warn', text:'No PIN set' };
+  if((u.failedAttempts||0) >= MAX_PIN_FAILS) return { cls:'bad', text:'Locked' };
+  if(u.pinExpiry && u.pinExpiry < todayStr()) return { cls:'bad', text:'Expired '+u.pinExpiry };
+  return { cls:'good', text: u.pinExpiry ? 'Expires '+u.pinExpiry : 'No expiry' };
+}
+
+/* A view-only session must never persist or push anything: browser saves of the data are skipped,
+   and sync is pull-only (see readOnlyRefresh). */
+(function(){
+  const orig = Storage.prototype.setItem;
+  Storage.prototype.setItem = function(k, v){
+    if(k===LS_KEY && isReadOnly()) return;
+    return orig.call(this, k, v);
+  };
+})();
+let _roSig = '';
+async function readOnlyRefresh(){
+  if(driveBusy) return;
+  driveBusy = true;
+  try{
+    const remote = await pullRemotePayload();
+    if(remote){
+      const { presence, savedAt, ...rest } = remote;
+      const sig = JSON.stringify(rest);
+      if(sig !== _roSig){ _roSig = sig; pullLatestFromDriveIntoLocal(remote); }
+      ORG.gdrive.lastSynced = new Date().toISOString(); driveLastError = null;
+    }
+  }catch(e){ driveLastError = e.message; }
+  driveBusy = false;
+  updateDriveStatusUI();
+}
+function applyReadOnlyUI(){
+  const ban = document.getElementById('roBanner');
+  const ro = isReadOnly();
+  if(ban) ban.style.display = ro ? 'block' : 'none';
+  if(!ro) return;
+  document.querySelectorAll('#topActions .btn').forEach(el=>{ if(/^\s*\+/.test(el.textContent)) el.style.display='none'; });
+  document.querySelectorAll('#content .btn.danger, #content [data-del], #modalBox .btn.danger').forEach(el=>{ el.style.display='none'; });
+  document.querySelectorAll('#modalBox form button[type=submit]').forEach(b=>{ b.disabled = true; b.title = 'View-only access'; });
+}
+let _roRaf = 0;
+new MutationObserver(()=>{
+  if(!SESSION || _roRaf) return;
+  _roRaf = requestAnimationFrame(()=>{ _roRaf = 0; applyReadOnlyUI(); });
+}).observe(document.body, { childList:true, subtree:true });
+
+function applyNavPermissions(){
+  document.querySelectorAll('#navList .nav-item').forEach(b=>{ b.style.display = can(b.dataset.tab) ? '' : 'none'; });
+}
+function renderUserBadge(){
+  const el = document.getElementById('navUserBadge'); if(!el) return;
+  if(!SESSION){ el.innerHTML = ''; return; }
+  el.innerHTML = `<span class="pill accent" title="Signed in as ${esc(SESSION.name)}">👤 ${esc(SESSION.name)} · ${esc(SESSION.role)}</span> <button type="button" class="btn secondary sm" id="logoutBtn">Sign out</button>`;
+  document.getElementById('logoutBtn').onclick = ()=>{
+    if(!confirm('Sign out?')) return;
+    try{ sessionStorage.removeItem(SESSION_KEY); }catch(e){}
+    location.reload();
+  };
+}
+function restoreSession(){
+  try{
+    const s = JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');
+    if(!s) return false;
+    const u = USERS.find(x=>x.id===s.userId && x.active!==false);
+    if(!u) return false;
+    SESSION = { userId:u.id, name:u.name, role:u.role };
+    return true;
+  }catch(e){ return false; }
+}
+function startSession(u){
+  SESSION = { userId:u.id, name:u.name, role:u.role };
+  try{ sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId:u.id })); }catch(e){}
+  hideLoginGate();
+  enterApp();
+}
+/* Keeps a signed-in session in step with the user list (role changed, deactivated or deleted by an
+   Admin on another device). */
+function refreshSessionFromUsers(){
+  if(!SESSION) return;
+  const u = USERS.find(x=>x.id===SESSION.userId);
+  if(!u || u.active===false){
+    try{ sessionStorage.removeItem(SESSION_KEY); }catch(e){}
+    toast('Your account was changed or removed by an Admin — please sign in again.', true);
+    setTimeout(()=>location.reload(), 1500);
+    return;
+  }
+  if(u.role !== SESSION.role){ SESSION.role = u.role; }
+}
+function onUsersChanged(){
+  refreshSessionFromUsers();
+  if(SESSION){ applyNavPermissions(); renderUserBadge(); applyReadOnlyUI(); }
+  refreshGate();
+  if(document.getElementById('userMgmtCard')) renderUserMgmt();
+}
+function enterApp(){
+  setStaffName(SESSION.name);
+  applyNavPermissions(); renderUserBadge();
+  const first = firstAllowedTab();
+  if(!first){
+    document.getElementById('content').innerHTML = '<div class="empty"><div class="icon">🔒</div>Your role has no modules enabled yet. Ask an Admin to update your access.</div>';
+    return;
+  }
+  setTab(can('dashboard') ? 'dashboard' : first);
+  Promise.all(EMPLOYEES.map(e=> loadCompliance(e.id))).then(()=>{
+    updateCompBadge();
+    if(activeTab==='staff') render();
+  });
+}
+
+/* ---------- Login gate (full-screen, until signed in) ---------- */
+function showLoginGate(){
+  if(!document.getElementById('loginGate')){
+    const g = document.createElement('div'); g.id = 'loginGate'; document.body.appendChild(g);
+  }
+  gateSig = ''; refreshGate();
+}
+function hideLoginGate(){ const g = document.getElementById('loginGate'); if(g) g.remove(); gateSig = ''; }
+function gateState(){
+  const loginUsers = USERS.filter(u=>u.active!==false && u.pinHash);
+  let mode;
+  if(gateView==='recover' || gateView==='setup') mode = gateView;
+  else if(loginUsers.length) mode = 'pin';
+  else if(!driveConnected()) mode = driveReconnecting ? 'connecting' : 'connect';
+  else if(!loginDataReady) mode = 'loading';
+  else if(loginLoadError) mode = 'error';
+  else mode = 'setup';
+  return { mode, loginUsers };
+}
+/* Checks that the server will actually hand us the data, so a non-allowed Google account (or an
+   outage) is reported clearly instead of being mistaken for "no data yet, create an Admin". */
+async function probeServerAccess(){
+  try{
+    await driveFetch('https://www.googleapis.com/drive/v3/files/'+(ORG.gdrive.fileId||'valles-api-data')+'?alt=media');
+    return null;
+  }catch(e){
+    return /\(404\)/.test(e.message) ? null : e.message;
+  }
+}
+function refreshGate(){
+  if(!document.getElementById('loginGate')) return;
+  const st = gateState();
+  const sig = st.mode+'|'+st.loginUsers.map(u=>u.id+':'+u.name).join(',')+'|'+(loginLoadError||'');
+  if(sig === gateSig) return;
+  gateSig = sig;
+  renderLoginGate(st);
+}
+function gateShell(inner){
+  const g = document.getElementById('loginGate'); if(!g) return;
+  g.innerHTML = `<div class="gate-card">
+    <div class="seal">🔐</div>
+    <h2 style="margin:0 0 2px;">${esc(ORG.companyName||'Valles Management System')}</h2>
+    <p class="gate-sub">Valles Management System</p>
+    ${inner}
+  </div>`;
+}
+function pinInputHtml(id, label){
+  return `<div class="field" style="text-align:left;"><label>${label}</label>
+    <input type="password" id="${id}" maxlength="6" inputmode="numeric" autocomplete="off" placeholder="• • • • • •" class="pin-input"></div>`;
+}
+function bindPinInputs(){
+  document.querySelectorAll('.pin-input').forEach(i=> i.addEventListener('input', ()=>{ i.value = i.value.replace(/[^0-9]/g,'').slice(0,6); }));
+}
+function gateMsg(text){ const e = document.getElementById('gateError'); if(e){ e.textContent = text||''; e.style.display = text ? 'block' : 'none'; } }
+
+function renderLoginGate(st){
+  st = st || gateState();
+  if(st.mode==='pin') return renderGatePin(st.loginUsers);
+  if(st.mode==='recover') return renderGateRecover();
+  if(st.mode==='setup') return renderGateSetup();
+  if(st.mode==='connecting' || st.mode==='loading'){
+    gateShell(`<p class="gate-sub">${st.mode==='connecting'?'Connecting to Google…':'Loading your team…'}</p>`);
+    return;
+  }
+  if(st.mode==='error'){
+    gateShell(`<div class="gate-error" style="display:block;">Could not load data from the server: ${esc(loginLoadError)}</div>
+      <p class="gate-sub">If this says you are not allowed, ask the owner to add your Google account. Otherwise check your connection.</p>
+      <button class="btn" id="gateRetry" style="width:100%;justify-content:center;">Reload</button>`);
+    document.getElementById('gateRetry').onclick = ()=> location.reload();
+    return;
+  }
+  // not connected to Google
+  gateShell(`<p class="gate-sub">Sign in with Google first, so your team and data can be loaded.</p>
+    <button class="btn" id="gateConnect" style="width:100%;justify-content:center;">Connect Google</button>
+    <p style="margin-top:14px;"><a href="#" id="gateLocalSetup" class="gate-link">Set up on this device without Google</a></p>`);
+  document.getElementById('gateConnect').onclick = ()=> connectDrive();
+  document.getElementById('gateLocalSetup').onclick = (e)=>{ e.preventDefault(); gateView = 'setup'; gateSig=''; refreshGate(); };
+}
+function renderGatePin(loginUsers){
+  gateShell(`
+    <p class="gate-sub">Enter your 6-digit PIN to continue</p>
+    <div class="field" style="text-align:left;"><label>Who are you?</label>
+      <select id="gateUser"><option value="">— Select your name —</option>${loginUsers.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
+    ${pinInputHtml('gatePin','6-digit PIN')}
+    <div class="gate-error" id="gateError"></div>
+    <button class="btn" id="gateSubmit" style="width:100%;justify-content:center;">Sign In →</button>
+    <p class="gate-sub" style="margin-top:14px;">Forgot your PIN? Ask an Admin to reset it.<br>
+      <a href="#" id="gateRecoverLink" class="gate-link">Admin recovery</a>${driveConnected()?'':' · <a href="#" id="gateReconnect" class="gate-link">Reconnect Google</a>'}</p>`);
+  bindPinInputs();
+  document.getElementById('gatePin').addEventListener('keydown', e=>{ if(e.key==='Enter') submitLogin(); });
+  document.getElementById('gateUser').addEventListener('change', ()=>{ document.getElementById('gatePin').value=''; gateMsg(''); });
+  document.getElementById('gateSubmit').onclick = submitLogin;
+  document.getElementById('gateRecoverLink').onclick = (e)=>{ e.preventDefault(); gateView='recover'; gateSig=''; refreshGate(); };
+  const rc = document.getElementById('gateReconnect'); if(rc) rc.onclick = (e)=>{ e.preventDefault(); connectDrive(); };
+  setTimeout(()=>{ const s = document.getElementById('gateUser'); if(s) s.focus(); }, 50);
+}
+async function submitLogin(){
+  const id = document.getElementById('gateUser').value;
+  const pin = document.getElementById('gatePin').value.trim();
+  if(!id){ gateMsg('Please select your name.'); return; }
+  if(!/^\d{6}$/.test(pin)){ gateMsg('PIN must be exactly 6 digits.'); return; }
+  let u = USERS.find(x=>x.id===id);
+  if(!u || u.active===false){ gateMsg('Account not found or inactive.'); return; }
+  if((u.failedAttempts||0) >= MAX_PIN_FAILS){ gateMsg('Account locked after too many wrong PINs. Ask an Admin to reset your PIN.'); return; }
+  if(!u.pinHash){ gateMsg('No PIN set for this account. Ask an Admin to set one.'); return; }
+  let ok = (await hashPin(u.id, pin)) === u.pinHash;
+  if(!ok && driveConnected()){
+    // The PIN may have just been changed on another device: refresh the user list once and re-check.
+    const remote = await pullRemotePayload();
+    if(remote){
+      USERS = mergeCollection('users', USERS, remote.users, remote.tombstones && remote.tombstones.users);
+      u = USERS.find(x=>x.id===id) || u;
+      ok = u.pinHash && (await hashPin(u.id, pin)) === u.pinHash;
+    }
+  }
+  if(!ok){
+    u.failedAttempts = (u.failedAttempts||0) + 1; tagRecord(u, false);
+    await saveUsers();
+    const left = Math.max(0, MAX_PIN_FAILS - u.failedAttempts);
+    gateMsg(left>0 ? `Incorrect PIN. ${left} attempt${left===1?'':'s'} remaining.` : 'Account locked — ask an Admin to reset your PIN.');
+    return;
+  }
+  if(u.pinExpiry && u.pinExpiry < todayStr()){ gateMsg(`Your PIN expired on ${u.pinExpiry}. Ask an Admin to set a new PIN for you.`); return; }
+  u.failedAttempts = 0; u.lastLogin = new Date().toISOString(); tagRecord(u, false);
+  await saveUsers();
+  startSession(u);
+}
+function renderGateSetup(){
+  gateShell(`
+    <p class="gate-sub"><b>First-time setup.</b> Create the Admin account. You will use this name and PIN to sign in and to add everyone else.</p>
+    <div class="field" style="text-align:left;"><label>Your Name</label><input type="text" id="setupName" placeholder="e.g. Priya"></div>
+    ${pinInputHtml('setupPin1','Choose a 6-digit PIN')}
+    ${pinInputHtml('setupPin2','Confirm PIN')}
+    <div class="gate-error" id="gateError"></div>
+    <button class="btn" id="setupSubmit" style="width:100%;justify-content:center;">Create Admin &amp; Sign In</button>`);
+  bindPinInputs();
+  document.getElementById('setupSubmit').onclick = async ()=>{
+    const name = document.getElementById('setupName').value.trim();
+    const p1 = document.getElementById('setupPin1').value, p2 = document.getElementById('setupPin2').value;
+    if(!name){ gateMsg('Please enter your name.'); return; }
+    if(!/^\d{6}$/.test(p1)){ gateMsg('PIN must be exactly 6 digits.'); return; }
+    if(p1!==p2){ gateMsg('PINs do not match.'); return; }
+    const u = { id:'USR-'+uid(), name, role:'Admin', active:true, pinExpiryDays:DEFAULT_PIN_DAYS, pinExpiry:addDaysStr(DEFAULT_PIN_DAYS),
+      failedAttempts:0, lastLogin:new Date().toISOString(), createdAt:new Date().toISOString() };
+    u.pinHash = await hashPin(u.id, p1);
+    tagRecord(u, true);
+    USERS.push(u);
+    await saveUsers();
+    gateView = 'login';
+    startSession(u);
+  };
+}
+function renderGateRecover(){
+  gateShell(`
+    <p class="gate-sub"><b>Admin recovery.</b> Enter the Settings admin password to set a new PIN for an Admin account.</p>
+    <div class="field" style="text-align:left;"><label>Settings Admin Password</label><input type="password" id="recPw" autocomplete="off"></div>
+    <div id="recStep2" style="display:none;">
+      <div class="field" style="text-align:left;"><label>Admin account</label><select id="recUser">${USERS.filter(u=>u.role==='Admin').map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
+      ${pinInputHtml('recPin1','New 6-digit PIN')}
+      ${pinInputHtml('recPin2','Confirm PIN')}
+    </div>
+    <div class="gate-error" id="gateError"></div>
+    <button class="btn" id="recSubmit" style="width:100%;justify-content:center;">Continue</button>
+    <p style="margin-top:14px;"><a href="#" id="recBack" class="gate-link">← Back to sign in</a></p>`);
+  bindPinInputs();
+  let verified = false;
+  document.getElementById('recBack').onclick = (e)=>{ e.preventDefault(); gateView='login'; gateSig=''; refreshGate(); };
+  document.getElementById('recSubmit').onclick = async ()=>{
+    if(!verified){
+      if(!ORG.adminPasswordHash){ gateMsg('No Settings admin password has been set. Ask another Admin to reset your PIN.'); return; }
+      const h = await sha256(document.getElementById('recPw').value);
+      if(h !== ORG.adminPasswordHash){ gateMsg('Incorrect password.'); return; }
+      if(!USERS.some(u=>u.role==='Admin')){ gateMsg('There is no Admin account to recover.'); return; }
+      verified = true; gateMsg('');
+      document.getElementById('recStep2').style.display = 'block';
+      document.getElementById('recPw').disabled = true;
+      document.getElementById('recSubmit').textContent = 'Set PIN & Sign In';
+      return;
+    }
+    const p1 = document.getElementById('recPin1').value, p2 = document.getElementById('recPin2').value;
+    if(!/^\d{6}$/.test(p1)){ gateMsg('PIN must be exactly 6 digits.'); return; }
+    if(p1!==p2){ gateMsg('PINs do not match.'); return; }
+    const u = USERS.find(x=>x.id===document.getElementById('recUser').value); if(!u) return;
+    const days = u.pinExpiryDays || DEFAULT_PIN_DAYS;
+    u.pinHash = await hashPin(u.id, p1); u.pinExpiry = addDaysStr(days); u.failedAttempts = 0; u.active = true;
+    u.lastLogin = new Date().toISOString(); tagRecord(u, false);
+    await saveUsers();
+    gateView = 'login';
+    startSession(u);
+  };
+}
+
+/* ---------- User Management card (Settings, Admin only) ---------- */
+function renderUserMgmt(){
+  const host = document.getElementById('userMgmtCard'); if(!host) return;
+  const perms = rolePerms();
+  const editRoles = ['Accounts','HR','View Only','CA'];
+  const moduleRows = [];
+  ACCESS_MODULES.forEach(m=>{
+    moduleRows.push({ key:m.key, label:m.label, sub:false });
+    (m.subs||[]).forEach(s=> moduleRows.push({ key:s.key, label:s.label, sub:true }));
+  });
+  host.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h2 style="margin-bottom:2px;">User Management — PIN Login <span class="tag">admin only</span></h2>
+          <p style="color:var(--muted);font-size:13px;margin:0;">Manage who can sign in. Each user has a 6-digit PIN that expires after the set period and must be renewed.</p>
+        </div>
+        <button class="btn" id="umAddBtn">+ Add User</button>
+      </div>
+
+      <div class="section-label">Role Permissions</div>
+      <p class="hint" style="margin:-4px 0 10px;">Tick which modules each role can open. Admin always has full access, including Settings. “Can add / edit / delete” off means the role is view-only.</p>
+      <div style="overflow-x:auto;">
+      <table class="um-matrix">
+        <thead><tr><th style="text-align:left;">Module</th><th>Admin</th>${editRoles.map(r=>`<th>${esc(r)}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${moduleRows.map(m=>`<tr class="${m.sub?'um-sub':''}"><td style="text-align:left;${m.sub?'padding-left:26px;':'font-weight:600;'}">${m.sub?'↳ ':''}${esc(m.label)}</td>
+            <td><input type="checkbox" checked disabled></td>
+            ${editRoles.map(r=>`<td><input type="checkbox" data-role="${esc(r)}" data-mod="${m.key}" ${perms[r].modules.includes(m.key)?'checked':''}></td>`).join('')}</tr>`).join('')}
+          <tr class="um-edit-row"><td style="text-align:left;font-weight:700;">Can add / edit / delete data</td>
+            <td><input type="checkbox" checked disabled></td>
+            ${editRoles.map(r=>`<td><input type="checkbox" data-role="${esc(r)}" data-edit="1" ${perms[r].edit?'checked':''}></td>`).join('')}</tr>
+        </tbody>
+      </table></div>
+      <div class="btn-row" style="margin-top:12px;"><button class="btn" id="umSavePerms">Save Permissions</button></div>
+
+      <div class="section-label">Users</div>
+      <div style="overflow-x:auto;" id="umUsersWrap"></div>
+    </div>`;
+
+  host.querySelectorAll('input[data-mod]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const role = cb.dataset.role, key = cb.dataset.mod;
+      const q = (k)=> host.querySelector(`input[data-role="${role}"][data-mod="${k}"]`);
+      if(key==='staff' && !cb.checked){ q('staff.details').checked = false; q('staff.payroll').checked = false; }
+      if(key.indexOf('staff.')===0 && cb.checked){ q('staff').checked = true; }
+    });
+  });
+  document.getElementById('umSavePerms').onclick = async ()=>{
+    const out = {};
+    editRoles.forEach(r=>{
+      out[r] = {
+        edit: !!host.querySelector(`input[data-role="${r}"][data-edit]`).checked,
+        modules: [...host.querySelectorAll(`input[data-role="${r}"][data-mod]`)].filter(c=>c.checked).map(c=>c.dataset.mod)
+      };
+    });
+    let rec = ACCESS.find(a=>a.id==='rolePerms');
+    if(!rec){ rec = { id:'rolePerms' }; ACCESS.push(rec); tagRecord(rec, true); } else tagRecord(rec, false);
+    rec.perms = out;
+    await saveAccess();
+    toast('Role permissions saved.');
+  };
+  document.getElementById('umAddBtn').onclick = ()=> openUserForm();
+  renderUserList();
+}
+function renderUserList(){
+  const wrap = document.getElementById('umUsersWrap'); if(!wrap) return;
+  const list = USERS.slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+  if(!list.length){ wrap.innerHTML = '<div class="empty" style="padding:20px;">No users yet.</div>'; return; }
+  wrap.innerHTML = `<table><thead><tr><th>Name</th><th>Role</th><th>PIN</th><th>Active</th><th>Last sign-in</th><th></th></tr></thead><tbody>
+    ${list.map(u=>{
+      const ps = pinStatus(u); const me = SESSION && SESSION.userId===u.id;
+      return `<tr>
+        <td><b>${esc(u.name)}</b>${me?' <span class="pill accent">you</span>':''}</td>
+        <td><select data-urole="${u.id}" style="padding:5px 8px;">${ROLES.map(r=>`<option ${u.role===r?'selected':''}>${r}</option>`).join('')}</select></td>
+        <td><span class="pill ${ps.cls}">${esc(ps.text)}</span></td>
+        <td><input type="checkbox" data-uactive="${u.id}" ${u.active!==false?'checked':''}></td>
+        <td style="color:var(--muted);font-size:12px;">${u.lastLogin?new Date(u.lastLogin).toLocaleString('en-IN'):'—'}</td>
+        <td style="white-space:nowrap;text-align:right;">
+          <button class="btn secondary sm" data-setpin="${u.id}">${u.pinHash?'🔑 Change PIN':'🔑 Set PIN'}</button>
+          ${(u.failedAttempts||0)>=MAX_PIN_FAILS?`<button class="btn secondary sm" data-unlock="${u.id}">Unlock</button>`:''}
+          <button class="btn secondary sm" data-uedit="${u.id}">Edit</button>
+          ${me?'':`<button class="btn danger sm" data-udel="${u.id}">Delete</button>`}
+        </td></tr>`;
+    }).join('')}</tbody></table>`;
+  wrap.querySelectorAll('[data-urole]').forEach(s=> s.onchange = ()=> changeUserRole(s.dataset.urole, s.value));
+  wrap.querySelectorAll('[data-uactive]').forEach(c=> c.onchange = ()=> toggleUserActive(c.dataset.uactive, c.checked));
+  wrap.querySelectorAll('[data-setpin]').forEach(b=> b.onclick = ()=> openSetPinForm(b.dataset.setpin));
+  wrap.querySelectorAll('[data-unlock]').forEach(b=> b.onclick = ()=> unlockUser(b.dataset.unlock));
+  wrap.querySelectorAll('[data-uedit]').forEach(b=> b.onclick = ()=> openUserForm(b.dataset.uedit));
+  wrap.querySelectorAll('[data-udel]').forEach(b=> b.onclick = ()=> deleteUser(b.dataset.udel));
+}
+async function persistUser(u){ tagRecord(u, false); await saveUsers(); renderUserList(); }
+async function changeUserRole(id, role){
+  const u = USERS.find(x=>x.id===id); if(!u || u.role===role) return;
+  if(u.role==='Admin' && activeAdmins().length<=1){ toast('There must be at least one active Admin.', true); renderUserList(); return; }
+  if(SESSION && SESSION.userId===id && u.role==='Admin'){ toast('You cannot change your own role away from Admin.', true); renderUserList(); return; }
+  u.role = role; await persistUser(u); toast(`${u.name} is now ${role}.`);
+}
+async function toggleUserActive(id, active){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  if(!active && SESSION && SESSION.userId===id){ toast("You can't deactivate your own account.", true); renderUserList(); return; }
+  if(!active && u.role==='Admin' && activeAdmins().length<=1){ toast('There must be at least one active Admin.', true); renderUserList(); return; }
+  u.active = active; await persistUser(u); toast(`${u.name} ${active?'activated':'deactivated'}.`);
+}
+async function unlockUser(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  u.failedAttempts = 0; await persistUser(u); toast(`${u.name} unlocked.`);
+}
+async function deleteUser(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  if(SESSION && SESSION.userId===id){ toast("You can't delete your own account.", true); return; }
+  if(u.role==='Admin' && u.active!==false && activeAdmins().length<=1){ toast('There must be at least one active Admin.', true); return; }
+  if(!confirm(`Delete ${u.name}? They will no longer be able to sign in. This cannot be undone.`)) return;
+  USERS = USERS.filter(x=>x.id!==id); recordTombstone('users', id);
+  await saveUsers(); renderUserList(); toast(`${u.name} deleted.`);
+}
+function openUserForm(id){
+  const u = id ? USERS.find(x=>x.id===id) : null;
+  openModal(`
+    <div class="modal-head"><h3>${u?'Edit User':'Add User'}</h3><button class="modal-close" id="mClose">✕</button></div>
+    <form id="userForm">
+      <div class="grid cols-2">
+        <div class="field"><label>Name *</label><input type="text" name="name" required value="${esc(u?u.name:'')}"></div>
+        <div class="field"><label>Role *</label><select name="role">${ROLES.map(r=>`<option ${u&&u.role===r?'selected':''}>${r}</option>`).join('')}</select></div>
+        <div class="field"><label>PIN valid for (days)</label><input type="number" name="days" min="0" step="1" value="${u?(u.pinExpiryDays==null?'':u.pinExpiryDays):DEFAULT_PIN_DAYS}" placeholder="${DEFAULT_PIN_DAYS}"><div class="hint">0 = never expires. Blank = ${DEFAULT_PIN_DAYS}.</div></div>
+        <div class="field"><label class="checkline" style="margin-top:22px;"><input type="checkbox" name="active" ${!u||u.active!==false?'checked':''}> Active</label></div>
+      </div>
+      <div class="btn-row"><button type="submit" class="btn">${u?'Save':'Add User'}</button><button type="button" class="btn secondary" id="mCancel">Cancel</button></div>
+    </form>`);
+  document.getElementById('mClose').onclick = closeModal; document.getElementById('mCancel').onclick = closeModal;
+  document.getElementById('userForm').onsubmit = async (ev)=>{
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const name = (fd.get('name')||'').trim(), role = fd.get('role'), active = !!fd.get('active');
+    const daysRaw = String(fd.get('days')||'').trim();
+    const days = daysRaw==='' ? DEFAULT_PIN_DAYS : Math.max(0, parseInt(daysRaw,10)||0);
+    if(!name){ toast('Name is required.', true); return; }
+    if(USERS.some(x=>x.id!==id && (x.name||'').toLowerCase()===name.toLowerCase())){ toast('A user with this name already exists.', true); return; }
+    if(u){
+      if(u.role==='Admin' && role!=='Admin' && activeAdmins().length<=1){ toast('There must be at least one active Admin.', true); return; }
+      if(!active && SESSION && SESSION.userId===u.id){ toast("You can't deactivate your own account.", true); return; }
+      u.name = name; u.role = role; u.active = active; u.pinExpiryDays = days;
+      tagRecord(u, false);
+    } else {
+      const nu = { id:'USR-'+uid(), name, role, active, pinExpiryDays:days, pinHash:'', pinExpiry:'', failedAttempts:0, lastLogin:'', createdAt:new Date().toISOString() };
+      tagRecord(nu, true); USERS.push(nu);
+    }
+    await saveUsers(); closeModal(); renderUserList();
+    toast(u ? 'User saved.' : 'User added — now set their PIN.');
+  };
+}
+function openSetPinForm(id){
+  const u = USERS.find(x=>x.id===id); if(!u) return;
+  const days = u.pinExpiryDays===0 ? 0 : (u.pinExpiryDays || DEFAULT_PIN_DAYS);
+  openModal(`
+    <div class="modal-head"><h3>🔑 ${u.pinHash?'Change':'Set'} PIN — ${esc(u.name)}</h3><button class="modal-close" id="mClose">✕</button></div>
+    <form id="pinForm">
+      <p class="hint" style="margin-top:0;">Choose a 6-digit PIN for <b>${esc(u.name)}</b> and tell them privately. It is stored as a one-way hash and can't be read back.</p>
+      <div class="grid cols-2">
+        <div class="field"><label>New 6-digit PIN *</label><input type="password" name="p1" maxlength="6" inputmode="numeric" autocomplete="off" class="pin-input"></div>
+        <div class="field"><label>Confirm PIN *</label><input type="password" name="p2" maxlength="6" inputmode="numeric" autocomplete="off" class="pin-input"></div>
+      </div>
+      <div class="field" style="max-width:240px;"><label>PIN expires on</label><input type="date" name="expiry" value="${days>0?addDaysStr(days):''}"><div class="hint">Leave blank for no expiry.</div></div>
+      <div class="btn-row"><button type="submit" class="btn">Save PIN</button><button type="button" class="btn secondary" id="mCancel">Cancel</button></div>
+    </form>`);
+  bindPinInputs();
+  document.getElementById('mClose').onclick = closeModal; document.getElementById('mCancel').onclick = closeModal;
+  document.getElementById('pinForm').onsubmit = async (ev)=>{
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const p1 = fd.get('p1'), p2 = fd.get('p2');
+    if(!/^\d{6}$/.test(p1)){ toast('PIN must be exactly 6 digits.', true); return; }
+    if(p1!==p2){ toast('PINs do not match.', true); return; }
+    u.pinHash = await hashPin(u.id, p1); u.pinExpiry = fd.get('expiry') || ''; u.failedAttempts = 0;
+    u.pinSetAt = new Date().toISOString(); u.pinSetBy = SESSION ? SESSION.name : '';
+    tagRecord(u, false); await saveUsers(); closeModal(); renderUserList();
+    toast(`PIN set for ${u.name}${u.pinExpiry?' · expires '+u.pinExpiry:''}.`);
+  };
+}
+
 /* ============================= NAV ============================= */
 document.getElementById('navList').addEventListener('click', (e)=>{
   const btn = e.target.closest('.nav-item'); if(!btn) return; setTab(btn.dataset.tab);
 });
 function setTab(tab){
+  if(SESSION && !can(tab)){ tab = firstAllowedTab() || 'dashboard'; }
   activeTab = tab;
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   const titles = {
@@ -651,6 +1229,7 @@ document.getElementById('overlay').addEventListener('click', (e)=>{ if(e.target.
 
 /* ============================= RENDER ROUTER ============================= */
 function render(){
+  if(!SESSION) return;
   const c = document.getElementById('content'); const actions = document.getElementById('topActions'); actions.innerHTML='';
   updateDriveStatusUI();
   renderPresenceBadge();
@@ -669,6 +1248,8 @@ function render(){
 let staffSubTab = 'details';
 let staffPayrollView = 'payslips';
 function renderStaffTab(c, actions){
+  if(!can('staff.details') && staffSubTab==='details') staffSubTab = 'payroll';
+  if(!can('staff.payroll') && staffSubTab==='payroll') staffSubTab = 'details';
   let missingCompliance = 0;
   Object.values(COMPLIANCE).forEach(arr=> (arr||[]).forEach(r=>{ if(!(r.files||[]).length) missingCompliance++; }));
   c.innerHTML = `
@@ -682,6 +1263,8 @@ function renderStaffTab(c, actions){
   `;
   document.getElementById('staffSubDetails').onclick = ()=>{ staffSubTab='details'; renderStaffTab(c, actions); };
   document.getElementById('staffSubPayroll').onclick = ()=>{ staffSubTab='payroll'; renderStaffTab(c, actions); };
+  if(!can('staff.details')) document.getElementById('staffSubDetails').style.display = 'none';
+  if(!can('staff.payroll')) document.getElementById('staffSubPayroll').style.display = 'none';
   if(staffSubTab==='details'){
     renderEmployees(document.getElementById('staffSubContent'), actions);
   } else {
@@ -1983,6 +2566,8 @@ function initGis(){
       toast('Google Drive connected.');
       ensureStaffName();
       try{ const waitingOnUser = await driveReconcileOnConnect(); if(!waitingOnUser) await driveSyncNow(); }catch(e){}
+      if(!USERS.some(u=>u.pinHash)) loginLoadError = await probeServerAccess();
+      loginDataReady = true; onUsersChanged();
       startAutoSyncLoop(); startPresenceLoop();
       if(activeTab==='settings') renderSettings(document.getElementById('content'), document.getElementById('tabActions'));
     }
@@ -2018,7 +2603,7 @@ function attemptSilentDriveReconnect(){
       initGis();
       if(gisTokenClient) gisTokenClient.requestAccessToken({ prompt:'' });
       else driveReconnecting = false;
-    } else if(tries > 24){ clearInterval(iv); driveReconnecting = false; }
+    } else if(tries > 24){ clearInterval(iv); driveReconnecting = false; updateDriveStatusUI(); }
   }, 250);
 }
 async function driveFetch(url, opts){
@@ -2120,6 +2705,8 @@ function pullLatestFromDriveIntoLocal(remote){
   TRANSACTIONS = mergeCollection('transactions', TRANSACTIONS, remote.transactions, remote.tombstones && remote.tombstones.transactions);
   EXPENSES = mergeCollection('expenses', EXPENSES, remote.expenses, remote.tombstones && remote.tombstones.expenses);
   REIMBURSEMENTS = mergeCollection('reimbursements', REIMBURSEMENTS, remote.reimbursements, remote.tombstones && remote.tombstones.reimbursements);
+  USERS = mergeCollection('users', USERS, remote.users, remote.tombstones && remote.tombstones.users);
+  ACCESS = mergeCollection('access', ACCESS, remote.access, remote.tombstones && remote.tombstones.access);
   if(remote.compliance){
     Object.keys(remote.compliance).forEach(empId=>{
       const tombKind = 'compliance:'+empId;
@@ -2129,8 +2716,9 @@ function pullLatestFromDriveIntoLocal(remote){
   }
   ensureLocal();
   LOCAL.employees = EMPLOYEES; LOCAL.payslips = PAYSLIPS; LOCAL.parties = PARTIES;
-  LOCAL.documents = COMPANY_DOCS; LOCAL.transactions = TRANSACTIONS; LOCAL.expenses = EXPENSES; LOCAL.reimbursements = REIMBURSEMENTS; LOCAL.compliance = COMPLIANCE;
+  LOCAL.documents = COMPANY_DOCS; LOCAL.transactions = TRANSACTIONS; LOCAL.expenses = EXPENSES; LOCAL.reimbursements = REIMBURSEMENTS; LOCAL.users = USERS; LOCAL.access = ACCESS; LOCAL.compliance = COMPLIANCE;
   try{ localStorage.setItem(LS_KEY, JSON.stringify(LOCAL)); }catch(e){}
+  onUsersChanged();
   if(activeTab && document.getElementById('content')) render(); // reflect anything that changed
 }
 function totalRecordCount(payload){
@@ -2145,9 +2733,12 @@ async function applyRestoredPayload(data){
   backfillOrgDefaults();
   EMPLOYEES = data.employees||[]; PAYSLIPS = data.payslips||[]; COMPLIANCE = data.compliance||{};
   PARTIES = data.parties||[]; COMPANY_DOCS = data.documents||[]; TRANSACTIONS = data.transactions||[]; EXPENSES = data.expenses||[]; REIMBURSEMENTS = data.reimbursements||[];
-  await saveOrg(); await saveEmployees(); await savePayslips(); await saveParties(); await saveCompanyDocs(); await saveTransactions(); await saveExpenses(); await saveReimbursements();
+  if(Array.isArray(data.users)) USERS = data.users;   /* an older backup without users must never wipe the user list */
+  if(Array.isArray(data.access)) ACCESS = data.access;
+  await saveOrg(); await saveEmployees(); await savePayslips(); await saveParties(); await saveCompanyDocs(); await saveTransactions(); await saveExpenses(); await saveReimbursements(); await saveUsers(); await saveAccess();
   for(const empId of Object.keys(COMPLIANCE)){ await saveCompliance(empId); }
   refreshBrand(); updateDocBadge();
+  onUsersChanged();
 }
 /* The core of a workable multi-device setup: run once right after a device connects to
    Drive for the first time, BEFORE any push happens. Finds whatever's already in Drive and
@@ -2302,6 +2893,7 @@ function renderPresenceBadge(){
 }
 async function driveSyncNow(){
   if(!driveConnected() || driveBusy || !ORG.gdrive.connected || reconcilePending) return;
+  if(isReadOnly()){ await readOnlyRefresh(); return; }   /* view-only sessions pull, never push */
   if(!driveDirty){ updateDriveStatusUI(); return; }
   driveBusy = true;
   try{
@@ -2320,6 +2912,7 @@ async function driveSyncNow(){
   renderPresenceBadge();
 }
 function updateDriveStatusUI(){
+  if(typeof refreshGate==='function') refreshGate();
   const el = document.getElementById('driveLastSync');
   if(el){
     if(driveReconnecting) el.textContent = 'Reconnecting to Google Drive…';
@@ -2511,7 +3104,7 @@ async function driveExportSheet(silent){
 function currentStaffName(){ return (localStorage.getItem('vallesEasyEmsStaffName')||'').trim(); }
 function setStaffName(n){ try{ localStorage.setItem('vallesEasyEmsStaffName', (n||'').trim()); }catch(e){} }
 function ensureStaffName(){
-  if(currentStaffName()) return;
+  if(currentStaffName() || SESSION || USERS.length || document.getElementById('loginGate')) return;
   openModal(`
     <div class="modal-head"><h3>Who's using this device?</h3></div>
     <p class="hint">Since a few of you may be working on this at the same time, your name gets tagged on the changes you make — that's how the app knows whose edit is newest if two people touch the same record.</p>
@@ -5233,6 +5826,8 @@ function renderSettings(c, actions){
       </form>
     </div>
 
+    <div id="userMgmtCard" style="margin:16px 0;"></div>
+
     <div class="card">
       <h2>Transactions</h2>
       <p style="color:var(--muted);font-size:13px;">Finalised transactions (Completed, Paid, or Invoiced) are locked for audit safety — no edit or delete — unless this is switched on.</p>
@@ -5440,6 +6035,7 @@ function renderSettings(c, actions){
       <p class="hint">The IDs are also the long string in each resource's URL — e.g. in <code>drive.google.com/drive/folders/<b>THIS-PART</b></code> and <code>docs.google.com/spreadsheets/d/<b>THIS-PART</b>/edit</code>.</p>
     </div>
   `;
+  renderUserMgmt();
   document.getElementById('orgForm').onsubmit = async (ev)=>{
     ev.preventDefault(); const fd = new FormData(ev.target);
     ['companyName','cin','pan','tan','gstin','tel','email','address','bankName','bankAccNo','bankIFSC','bankBranch'].forEach(k=> ORG[k] = fd.get(k) ? fd.get(k).trim() : '');
@@ -5923,12 +6519,9 @@ async function viewDriveBackupDetail(fileId, label){
 (async function init(){
   await loadAll();
   updateDocBadge();
-  setTab('dashboard'); // paint immediately — don't block first render on compliance or Drive
-  Promise.all(EMPLOYEES.map(e=> loadCompliance(e.id))).then(()=>{
-    updateCompBadge();
-    if(activeTab==='staff') render(); // refresh the compliance badge if already viewing it
-  });
+  restoreSession();
   if(ORG.gdrive && ORG.gdrive.connected){ attemptSilentDriveReconnect(); startAutoSyncLoop(); startPresenceLoop(); ensureStaffName(); }
+  if(SESSION) enterApp(); else showLoginGate();
 })();
 </script>
 </body>
