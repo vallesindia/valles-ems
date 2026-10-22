@@ -576,7 +576,17 @@ async function loadAll(){
   ACCESS = await getJSON('access', []);
   refreshBrand();
 }
-async function saveOrg(){ return await setJSON('org-profile', ORG); }
+async function saveOrg(){ ORG._orgUpdatedAt = new Date().toISOString(); return await setJSON('org-profile', ORG); }
+/* Company details (ORG) are one record. Adopt the shared copy when it is newer than ours, keeping this
+   device's own Google settings, and never let a counter (employee / voucher numbers) go backwards. */
+function mergeRemoteOrg(remote){
+  if(!remote || !remote.org || !remote.org._orgUpdatedAt) return false;
+  if(ORG._orgUpdatedAt && ORG._orgUpdatedAt >= remote.org._orgUpdatedAt) return false;
+  const keep = ORG.gdrive, old = ORG, next = Object.assign({}, remote.org);
+  Object.keys(next).forEach(k=>{ if(typeof next[k]==='number' && typeof old[k]==='number') next[k] = Math.max(next[k], old[k]); });
+  next.gdrive = keep; ORG = next;
+  return true;
+}
 async function saveReimbursements(){
   const remote = await pullRemotePayload();
   REIMBURSEMENTS = mergeCollection('reimbursements', REIMBURSEMENTS, remote && remote.reimbursements, remote && remote.tombstones && remote.tombstones.reimbursements);
@@ -2698,6 +2708,7 @@ async function driveEnsureDataFile(){
    device happens to save something itself. */
 function pullLatestFromDriveIntoLocal(remote){
   if(!remote) return;
+  if(mergeRemoteOrg(remote)){ ensureLocal(); LOCAL.org = ORG; }
   EMPLOYEES = mergeCollection('employees', EMPLOYEES, remote.employees, remote.tombstones && remote.tombstones.employees);
   PAYSLIPS = mergeCollection('payslips', PAYSLIPS, remote.payslips, remote.tombstones && remote.tombstones.payslips);
   PARTIES = mergeCollection('parties', PARTIES, remote.parties, remote.tombstones && remote.tombstones.parties);
