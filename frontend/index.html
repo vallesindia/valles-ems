@@ -387,12 +387,12 @@ const DEFAULT_ORG = {
      Defaults below are the FY2025-26 rules this app shipped with. slabs: [cap, rate] pairs,
      cap:null means "and above". surcharge: [incomeAbove, rate] tiers. */
   taxNew: {
-    stdDeduction: 75000, rebateThreshold: 1200000, cess: 0.04,
+    fy: '2025-26', stdDeduction: 75000, rebateThreshold: 1200000, cess: 0.04,
     slabs: [[400000,0],[800000,0.05],[1200000,0.10],[1600000,0.15],[2000000,0.20],[2400000,0.25],[null,0.30]],
     surcharge: [[5000000,0.10],[10000000,0.15],[20000000,0.25]]
   },
   taxOld: {
-    stdDeduction: 50000, rebateThreshold: 500000, cess: 0.04,
+    fy: '2025-26', stdDeduction: 50000, rebateThreshold: 500000, cess: 0.04,
     slabs: [[250000,0],[500000,0.05],[1000000,0.20],[null,0.30]],
     surcharge: [[5000000,0.10],[10000000,0.15],[20000000,0.25],[50000000,0.37]]
   },
@@ -5986,8 +5986,12 @@ function renderSettings(c, actions){
       <p style="color:var(--muted);font-size:13px;">These are the exact rules the payslip tax engine uses. When a Budget changes slabs, thresholds, cess or surcharge, update them here — no code change needed. Slab rows are annual taxable-income brackets; leave the last row's "Up To" blank for "and above". Surcharge rows are annual-income thresholds above which that surcharge rate applies.</p>
       ${['New','Old'].map(regime=>{
         const key = 'tax'+regime, r = ORG[key];
+        const fy = (r.fy||'2025-26'), fyStart = parseInt(fy,10), ay = fyStart ? `${fyStart+1}-${String((fyStart+2)%100).padStart(2,'0')}` : '';
         return `
-        <div class="section-label" style="margin-top:${regime==='Old'?'18px':'6px'};">${regime} Regime</div>
+        <div class="section-label" style="margin-top:${regime==='Old'?'18px':'6px'};">${regime} Regime — FY ${esc(fy)}${ay?` (AY ${ay})`:''}</div>
+        <div class="grid cols-3">
+          <div class="field"><label>Applies to Financial Year</label><input type="text" data-taxfield="${key}-fy" value="${esc(fy)}" placeholder="e.g. 2026-27" title="The financial year these slabs and thresholds are for (April–March). Shown in the heading and used to label which year's rules the payslips follow."></div>
+        </div>
         <div class="grid cols-3">
           <div class="field"><label>Standard Deduction (₹/yr)</label><input type="number" step="0.01" min="0" data-taxfield="${key}-stdDeduction" value="${r.stdDeduction}"></div>
           <div class="field"><label>Rebate Threshold — nil tax up to (₹/yr)</label><input type="number" step="0.01" min="0" data-taxfield="${key}-rebateThreshold" value="${r.rebateThreshold}"></div>
@@ -6373,6 +6377,8 @@ function renderSettings(c, actions){
   document.querySelectorAll('[data-addsurcharge]').forEach(b=> b.onclick = ()=>{ ORG[b.dataset.addsurcharge].surcharge.push([0,0]); drawSurcharge(b.dataset.addsurcharge); });
   document.getElementById('saveTaxRules').onclick = async ()=>{
     ['taxNew','taxOld'].forEach(key=>{
+      const fyIn = document.querySelector(`[data-taxfield="${key}-fy"]`);
+      if(fyIn){ const v = fyIn.value.trim(); if(/^\d{4}-\d{2}$/.test(v)) ORG[key].fy = v; }
       const std = document.querySelector(`[data-taxfield="${key}-stdDeduction"]`);
       const reb = document.querySelector(`[data-taxfield="${key}-rebateThreshold"]`);
       const cs  = document.querySelector(`[data-taxfield="${key}-cess"]`);
@@ -6393,7 +6399,7 @@ function renderSettings(c, actions){
     });
     const lsr = document.getElementById('lumpSumRateField');
     if(lsr) ORG.lumpSumBonusRate = (Number(lsr.value)||0)/100;
-    await saveOrg(); toast('Income tax rules saved.');
+    await saveOrg(); toast('Income tax rules saved.'); render();
   };
 
   const saveTdsFilingBtn = document.getElementById('saveTdsFilingBtn');
