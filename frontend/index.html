@@ -66,6 +66,12 @@
   .card{background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);padding:20px;box-shadow:0 1px 2px rgba(20,30,50,.03);}
   .card + .card{margin-top:16px;}
   .card h2{font-size:15.5px;margin:0 0 14px;font-weight:700;display:flex;align-items:center;gap:8px;}
+  .set-collapsible h2.set-h{cursor:pointer;user-select:none;}
+  .set-collapsible h2.set-h::after{content:'▾';margin-left:auto;color:var(--muted);font-size:14px;transition:transform .15s;}
+  .set-collapsible.set-closed h2.set-h{margin-bottom:0 !important;}
+  .set-collapsible.set-closed h2.set-h::after{transform:rotate(-90deg);}
+  .set-collapsible.set-closed > :not(h2):not(.set-head){display:none !important;}
+  .set-collapsible.set-closed > .set-head > :not(:has(h2.set-h)){display:none !important;}
   .card h2 .tag{font-family:var(--mono);font-size:10px;color:var(--muted);background:var(--bg);padding:2px 6px;border-radius:4px;letter-spacing:.05em;}
 
   .grid{display:grid;gap:14px;}
@@ -805,7 +811,7 @@ function onUsersChanged(){
   refreshSessionFromUsers();
   if(SESSION){ applyNavPermissions(); renderUserBadge(); applyReadOnlyUI(); }
   refreshGate();
-  if(document.getElementById('userMgmtCard')) renderUserMgmt();
+  if(document.getElementById('userMgmtCard')){ renderUserMgmt(); makeSettingsCollapsible(); }
 }
 function enterApp(){
   setStaffName(SESSION.name);
@@ -5773,6 +5779,18 @@ function doRestore(file){
 }
 
 /* ============================= SETTINGS (password protected) ============================= */
+/* Settings cards fold up by click on their heading. All start closed; the open ones are remembered while the page is open. */
+const _setOpen = { 'Company Details admin only': true, 'User Management — PIN Login admin only': true };
+function makeSettingsCollapsible(root){
+  (root||document).querySelectorAll('#content .card').forEach(card=>{
+    const h = card.querySelector('h2'); if(!h || card.classList.contains('set-collapsible')) return;
+    h.classList.add('set-h'); const head = h.parentElement!==card ? [...card.children].find(ch=>ch.contains(h)) : null; if(head) head.classList.add('set-head');
+    const key = h.textContent.replace(/\s+/g,' ').trim();
+    card.classList.add('set-collapsible');
+    if(!_setOpen[key]) card.classList.add('set-closed');
+    h.onclick = ()=>{ const closed = card.classList.toggle('set-closed'); _setOpen[key] = !closed; };
+  });
+}
 function renderSettings(c, actions){
   if(!settingsUnlocked){
     const firstRun = !ORG.adminPasswordHash;
@@ -6047,6 +6065,7 @@ function renderSettings(c, actions){
     </div>
   `;
   renderUserMgmt();
+  makeSettingsCollapsible();
   document.getElementById('orgForm').onsubmit = async (ev)=>{
     ev.preventDefault(); const fd = new FormData(ev.target);
     ['companyName','cin','pan','tan','gstin','tel','email','address','bankName','bankAccNo','bankIFSC','bankBranch'].forEach(k=> ORG[k] = fd.get(k) ? fd.get(k).trim() : '');
