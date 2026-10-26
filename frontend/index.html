@@ -39,7 +39,13 @@
 
   /* Top bar */
   .topnav{background:#fff;border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:20;}
-  .topnav-inner{display:flex;align-items:center;gap:6px;padding:0 20px;max-width:1400px;margin:0 auto;overflow-x:auto;}
+  .topnav-inner{display:flex;align-items:center;gap:6px;padding:0 20px;max-width:1400px;margin:0 auto;flex-wrap:wrap;}
+  /* Two rows, no scrollbar: company name + status on top, tabs underneath. */
+  .topnav-inner .brand{order:1;border-right:none;padding:8px 14px 4px 0;margin-right:0;}
+  .topnav-inner .brand-name{max-width:420px;}
+  .topnav-inner #navPresenceBadge{order:2;}
+  .topnav-inner #navDriveBadge,.topnav-inner #navUserBadge{order:3;}
+  .topnav-inner #navList{order:4;flex:0 0 100%;flex-wrap:wrap;gap:2px;border-top:1px solid var(--rule);padding:2px 0 4px;}
   .brand{display:flex;align-items:center;gap:9px;padding:14px 14px 14px 0;margin-right:6px;border-right:1px solid var(--rule);}
   .brand-logo{width:32px;height:32px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;flex:0 0 32px;overflow:hidden;}
   .brand-logo img{width:100%;height:100%;object-fit:cover;}
