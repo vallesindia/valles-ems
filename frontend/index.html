@@ -378,7 +378,7 @@ const DEFAULT_ORG = {
      deduction in February — e.g. Maharashtra: ₹200 × 11 months + ₹300 in Feb = ₹2,500/year
      exactly. Set to 0 to disable the February top-up for states that don't do this. */
   ptAnnualCap: 2500,
-  applyPfCeiling: false, pfCeiling: 15000,
+  applyPfCeiling: false, pfCeiling: 15000, pfCeilingNew: 25000, pfCeilingNewFrom: '2026-09-17',
   /* CTC structuring policy: given ONE CTC number, this is how the full monthly breakdown
      is derived. See "Revise by CTC" in Salary Revision. Editable in Settings. */
   ctcPolicy: { basicPct: 0.50, childrenEducation: 200, defaultReimbursement: 40000 },
@@ -590,12 +590,14 @@ async function loadAll(){
 }
 async function saveOrg(){ ORG._orgUpdatedAt = new Date().toISOString(); return await setJSON('org-profile', ORG); }
 /* Company details (ORG) are one record. Adopt the shared copy when it is newer than ours, keeping this
-   device's own Google settings, and never let a counter (employee / voucher numbers) go backwards. */
+   device's own Google settings, and never let the employee / voucher number counters go backwards. */
 function mergeRemoteOrg(remote){
   if(!remote || !remote.org || !remote.org._orgUpdatedAt) return false;
   if(ORG._orgUpdatedAt && ORG._orgUpdatedAt >= remote.org._orgUpdatedAt) return false;
   const keep = ORG.gdrive, old = ORG, next = Object.assign({}, remote.org);
-  Object.keys(next).forEach(k=>{ if(typeof next[k]==='number' && typeof old[k]==='number') next[k] = Math.max(next[k], old[k]); });
+  // Only the running number counters are protected from going backwards; every other setting follows the newer copy.
+  if(typeof old.employeeSeq==='number') next.employeeSeq = Math.max(Number(next.employeeSeq)||0, old.employeeSeq);
+  ['txnSeq','expSeq'].forEach(k=>{ if(old[k] && typeof old[k]==='object'){ next[k] = Object.assign({}, next[k]||{}); Object.keys(old[k]).forEach(x=>{ next[k][x] = Math.max(Number(next[k][x])||0, Number(old[k][x])||0); }); } });
   next.gdrive = keep; ORG = next;
   return true;
 }
@@ -1529,13 +1531,25 @@ async function submitEmployeeForm(ev, isEdit, e){
    is the balancing figure so everything reconciles exactly back to the CTC entered. PT depends
    on gross and gross depends on PT, so this iterates a couple of times to converge (it always
    does — PT only takes a handful of discrete values). */
+/* EPF wage ceiling for a payroll month ('YYYY-MM'): the old ceiling before the revision, the new one after it, and a
+   day-weighted blend in the month it takes effect (e.g. Sep 2026: 16 days at ₹15,000 + 14 days at ₹25,000 = ₹19,667). */
+function pfWageCapFor(period){
+  const old = Number(ORG.pfCeiling)||15000, neu = Number(ORG.pfCeilingNew)||25000;
+  const from = ORG.pfCeilingNewFrom || '2026-09-17';
+  const per = period || new Date().toISOString().slice(0,7), fromMonth = from.slice(0,7);
+  if(per < fromMonth) return old;
+  if(per > fromMonth) return neu;
+  const dim = new Date(Number(per.slice(0,4)), Number(per.slice(5,7)), 0).getDate();
+  const before = Math.max(0, Math.min(dim, (Number(from.slice(8,10))||1) - 1));
+  return Math.round(old*before/dim + neu*(dim-before)/dim);
+}
 function deriveFromCTC(ctc, reimbursement){
   const pol = ORG.ctcPolicy;
   const basic = ctc * pol.basicPct;
   const hra = basic * 0.5;
   const childrenEducation = pol.childrenEducation;
   const lta = basic / 12;
-  const basicForPf = ORG.applyPfCeiling ? Math.min(basic, ORG.pfCeiling||15000) : basic;
+  const basicForPf = ORG.applyPfCeiling ? Math.min(basic, pfWageCapFor()) : basic;
   const pfEmployee = Math.round(basicForPf*0.12);
   const pfEmployer = pfEmployee;
   // CTC = Gross + PF Employer + Reimbursement — confirmed against two independent real
@@ -1702,7 +1716,7 @@ function openReviseSalary(empId){
   const s = currentSalary(e);
   const nextMonth = new Date().toISOString().slice(0,7);
   const baseRev = Number(e._rev)||0;
-  const pfEmployerNow = s.basic ? Math.round((ORG.applyPfCeiling?Math.min(s.basic,ORG.pfCeiling||15000):s.basic)*0.12) : 0;
+  const pfEmployerNow = s.basic ? Math.round((ORG.applyPfCeiling?Math.min(s.basic,pfWageCapFor()):s.basic)*0.12) : 0;
   const currentCtc = grossOf(s) + pfEmployerNow + (s.reimbursement||0);
   // Every employee was set up with whatever % happened to work out manually at the time, so
   // rather than defaulting everyone to one company-wide %, this starts from what THIS
@@ -1965,7 +1979,7 @@ function computePayslip(emp, period, recurringAddition, lumpSum, lumpSumRateOver
   const isContractor = s.taxRegime==='contractor';
   const pfOn = !isContractor || s.contractorPfApplicable;
   const esiOn = !isContractor || s.contractorEsiApplicable;
-  const basicForPf = ORG.applyPfCeiling ? Math.min(s.basic, ORG.pfCeiling||15000) : s.basic;
+  const basicForPf = ORG.applyPfCeiling ? Math.min(s.basic, pfWageCapFor(period)) : s.basic;
   const pfEmployee = pfOn ? round2(basicForPf*0.12) : 0;
   const pfEmployer = pfEmployee; // mirrored, standard practice; bonus excluded from PF wages
   const esi = (esiOn && gross<=21000) ? round2(gross*0.0075) : 0; // bonus excluded from ESI wages; threshold always applies regardless of the toggle
@@ -4779,7 +4793,7 @@ function pfLiabilityData(year, month){
     const pfBase = p.pfEmployee>0 ? round2(p.pfEmployee/0.12) : 0;
     const isCapped = pfBase>0 && pfBase < (p.basic||0) - 0.5;
     const admin = Math.round(pfBase*0.005);
-    const edliBase = Math.min(p.basic||0, 15000);
+    const edliBase = Math.min(p.basic||0, pfWageCapFor(period));
     const edli = Math.round(edliBase*0.005);
     const total = round2((p.pfEmployee||0)+(p.pfEmployer||0)+admin+edli);
     return { empId:p.empId, name:p.empName||(emp?emp.name:'—'), type:(emp?emp.department:'')||'—', pfWages:p.basic||0,
@@ -5078,10 +5092,11 @@ function exportPfEcr(pf, monthLong){
   // Standard EPFO ECR text format: pipe-delimited, one row per employee —
   // UAN#~#Name#~#GrossWages#~#EPFWages#~#EPSWages#~#EDLIWages#~#EPFContribution#~#EPSContribution#~#EPFEPSDiff#~#NCPDays#~#RefundAdvance
   const lines = pf.rows.map(r=>{
-    const epsWages = Math.min(r.pfWages, 15000);
-    const epsContribution = round2(epsWages*0.0833); // 8.33% of the employer's 12% goes to EPS, capped at 15k wages
+    const wageCap = pfWageCapFor(pf.period);
+    const epsWages = Math.min(r.pfWages, wageCap);
+    const epsContribution = round2(epsWages*0.0833); // 8.33% of the employer's 12% goes to EPS, capped at the EPF wage ceiling
     const epfEpsDiff = round2(r.pfEmployer - epsContribution);
-    return [r.uan||'', r.name, r.pfWages.toFixed(2), Math.min(r.pfWages,15000).toFixed(2), epsWages.toFixed(2), Math.min(r.pfWages,15000).toFixed(2),
+    return [r.uan||'', r.name, r.pfWages.toFixed(2), Math.min(r.pfWages,wageCap).toFixed(2), epsWages.toFixed(2), Math.min(r.pfWages,wageCap).toFixed(2),
       r.pfEmployee.toFixed(2), epsContribution.toFixed(2), epfEpsDiff.toFixed(2), '0', '0.00'].join('#~#');
   });
   const content = lines.join('\r\n');
@@ -5969,8 +5984,13 @@ function renderSettings(c, actions){
       <p style="color:var(--muted);font-size:13px;">EPF is 12% of Basic, ESI is 0.75% of gross (applicable up to ₹21,000 gross). Income tax slabs and rates for both regimes are fully editable below, so this stays accurate when the government revises them in a future Budget. Professional Tax uses the slabs below — edit to match your state. These are estimates for reference — verify with your CA before filing.</p>
       <div class="field">
         <label class="checkline"><input type="checkbox" id="pfCeilingChk" ${ORG.applyPfCeiling?'checked':''}> Apply EPF wage ceiling</label>
-        <input type="number" id="pfCeilingVal" value="${ORG.pfCeiling||15000}" style="margin-top:6px;max-width:160px;">
       </div>
+      <div class="grid cols-3" style="margin-top:6px;">
+        <div class="field"><label>Ceiling until the revision (₹/month)</label><input type="number" id="pfCeilingVal" min="0" value="${ORG.pfCeiling||15000}"></div>
+        <div class="field"><label>Revised ceiling (₹/month)</label><input type="number" id="pfCeilingNewVal" min="0" value="${ORG.pfCeilingNew||25000}"></div>
+        <div class="field"><label>Revised ceiling applies from</label><input type="date" id="pfCeilingNewFromVal" value="${esc(ORG.pfCeilingNewFrom||'2026-09-17')}"></div>
+      </div>
+      <p class="hint" style="margin:-2px 0 10px;">Each payslip month uses the right ceiling automatically: the first value before the date, the revised value after it, and a day-weighted mix in the month it starts (Sep 2026: 16 days at ₹15,000 + 14 days at ₹25,000 = ₹19,667). Earlier months are not changed. The PF Liability admin/EDLI base and the ECR file follow the same ceiling.</p>
       <div class="section-label">Professional Tax Slabs (monthly gross, ₹)</div>
       <div class="field" style="max-width:340px;">
         <label>Annual PT Cap (₹/year, 0 = disabled)</label>
@@ -6343,6 +6363,8 @@ function renderSettings(c, actions){
     document.querySelectorAll('[data-slab]').forEach(inp=>{ const [i,field] = inp.dataset.slab.split('-'); ORG.ptSlabs[Number(i)][field] = Number(inp.value)||0; });
     ORG.applyPfCeiling = document.getElementById('pfCeilingChk').checked;
     ORG.pfCeiling = Number(document.getElementById('pfCeilingVal').value)||15000;
+    ORG.pfCeilingNew = Number(document.getElementById('pfCeilingNewVal').value)||25000;
+    ORG.pfCeilingNewFrom = document.getElementById('pfCeilingNewFromVal').value || '2026-09-17';
     ORG.ptAnnualCap = Number(document.getElementById('ptAnnualCapVal').value)||0;
     await saveOrg(); toast('Statutory rules saved.');
   };
