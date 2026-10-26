@@ -3592,6 +3592,7 @@ function evalFormula(str){
   }catch(e){ return NaN; }
 }
 function calcLineAmount(item){
+  if(item && item.kind==='heading') return 0;
   const base = (Number(item.qty)||0) * (Number(item.rate)||0);
   const discPct = Number(item.discountPct)||0;
   return base * (1 - discPct/100);
@@ -3605,10 +3606,23 @@ function calcTxnTotals(txn){
     if(txn.gstMode==='Inter') igst += tax;
     else if(txn.gstMode==='Intra'){ cgst += tax/2; sgst += tax/2; }
   });
+  // Optional "Other Charges" row (own GST %) and a manual Round Off — both zero on older records.
+  const otherCharges = Number(txn.otherCharges)||0;
+  const ocTax = (txn.gstMode==='Inter'||txn.gstMode==='Intra') ? otherCharges * (Number(txn.otherChargesGstPct)||0) / 100 : 0;
+  if(txn.gstMode==='Inter') igst += ocTax; else if(txn.gstMode==='Intra'){ cgst += ocTax/2; sgst += ocTax/2; }
+  const roundOff = Number(txn.roundOff)||0;
   const taxAmount = cgst+sgst+igst;
-  const grandTotal = subtotal+taxAmount;
-  return { subtotal, cgst, sgst, igst, taxAmount, grandTotal,
-    subtotalINR: subtotal*rate, taxAmountINR: taxAmount*rate, grandTotalINR: grandTotal*rate };
+  const grandTotal = subtotal+otherCharges+taxAmount+roundOff;
+  return { subtotal, otherCharges, roundOff, cgst, sgst, igst, taxAmount, grandTotal,
+    subtotalINR: (subtotal+otherCharges)*rate, taxAmountINR: taxAmount*rate, grandTotalINR: grandTotal*rate };
+}
+/* Serial numbers for the invoice: headings are A, B, C…; items restart at 1 under each heading. */
+function lineSerials(items){
+  let letter = 0, n = 0;
+  return (items||[]).map(li=>{
+    if(li.kind==='heading'){ n = 0; return String.fromCharCode(65 + (letter++ % 26)); }
+    return String(++n);
+  });
 }
 function txnStatusPill(status){
   const cls = {Draft:'neutral',Sent:'accent',Approved:'good',Completed:'good',Paid:'good',Issued:'accent',Acknowledged:'good',Invoiced:'good'}[status]||'neutral';
@@ -3703,6 +3717,7 @@ function renderTransactions(c, actions){
 }
 
 let txnLineItems = [];
+function blankHeading(){ return { id: uid(), kind:'heading', description:'' }; }
 function blankLineItem(){ return { id: uid(), description:'', hsn:'', qty:1, uom:'NOS', rate:0, discountPct:0, gstPct:18 }; }
 function openTxnForm(txnId, prefill){
   const isEdit = !!txnId;
@@ -3714,6 +3729,7 @@ function openTxnForm(txnId, prefill){
     dnTransportMode:'Local', dnVehicleNo:'', dnPlaceOfDelivery:'', dnType:'Workshop', dnLinkedInvoice:'', dnSignedStatus:'Pending', dnDeliveryDateTime:'',
     fundReceivedAmount:'', fundReceivedDate:'', fundReceivedVia:'', linkedInvoice:'', linkedProforma:'',
     linkedInvoiceGST:'', linkedInvoiceNonGST:'', linkedProformas:[],
+    otherCharges:0, otherChargesGstPct:0, roundOff:0,
     terms:'', notes:'', items:[blankLineItem()]
   };
   const t = isEdit ? TRANSACTIONS.find(x=>x.id===txnId) : Object.assign(blank, prefill||{});
@@ -3760,6 +3776,12 @@ function openTxnForm(txnId, prefill){
         <span>Line Items</span>
       </div>
       <div id="lineItemsWrap"></div>
+      <div class="grid cols-4" style="margin-top:10px;">
+        <div class="field"><label>Other Charges (optional)</label><input type="number" step="0.01" name="otherCharges" id="txnOtherCharges" value="${t.otherCharges||0}"></div>
+        <div class="field"><label>Other Charges GST %</label><input type="number" min="0" step="0.01" name="otherChargesGstPct" id="txnOtherChargesGst" value="${t.otherChargesGstPct||0}"></div>
+        <div class="field"><label>Round Off (+/−)</label><input type="number" step="0.01" name="roundOff" id="txnRoundOff" value="${t.roundOff||0}"></div>
+        <div class="field"><label>&nbsp;</label><button type="button" class="btn secondary sm" id="txnAutoRound" title="Round the grand total to a whole number">Auto round off</button></div>
+      </div>
       <div id="txnTotalsPreview"></div>
       <div class="grid cols-2" style="margin-top:10px;">
         <div class="field"><label>Terms &amp; Conditions</label><textarea name="terms" rows="2">${esc(t.terms)}</textarea></div>
@@ -3838,6 +3860,7 @@ function openTxnForm(txnId, prefill){
   const UOM_OPTIONS = ['NOS','PCS','KG','MTR','LTR','BOX','SET','PKT','HRS','DAY','WKS','MTH','JOB','VESSEL'];
   function drawLineItems(){
     const gstMode = document.getElementById('txnGstMode').value;
+    const serials = lineSerials(txnLineItems);
     document.getElementById('lineItemsWrap').innerHTML = `
       <div style="overflow-x:auto;">
       <table class="lineitem-table"><thead><tr>
@@ -3848,6 +3871,11 @@ function openTxnForm(txnId, prefill){
         <th style="width:110px;">Total</th><th style="width:34px;"></th>
       </tr></thead><tbody>
       ${txnLineItems.map((li,i)=>{
+        if(li.kind==='heading') return `<tr data-line="${i}" style="background:#F4F6FA;">
+          <td class="num-cell"><b>${serials[i]}</b></td>
+          <td colspan="11"><textarea data-li="description" rows="1" style="resize:vertical;white-space:pre-wrap;min-height:34px;font-weight:700;" placeholder="Group heading, e.g. Technical services fee for the period 01/09/2026 – 02/09/2026">${esc(li.description)}</textarea></td>
+          <td><button type="button" class="btn danger sm" data-rmline="${i}" title="Remove heading">✕</button></td>
+        </tr>`;
         const taxable = calcLineAmount(li);
         const gstPct = Number(li.gstPct)||0;
         const sgstPct = gstMode==='Intra' ? gstPct/2 : 0;
@@ -3855,7 +3883,7 @@ function openTxnForm(txnId, prefill){
         const igstPct = gstMode==='Inter' ? gstPct : 0;
         const lineTotal = taxable * (1 + (gstMode==='None'?0:gstPct)/100);
         return `<tr data-line="${i}">
-          <td class="num-cell">${i+1}</td>
+          <td class="num-cell">${serials[i]}</td>
           <td><textarea data-li="description" rows="2" style="resize:vertical;white-space:pre-wrap;min-height:38px;" placeholder="Description">${esc(li.description)}</textarea></td>
           <td><input type="text" data-li="hsn" value="${esc(li.hsn)}" placeholder="HSN"></td>
           <td><input type="number" min="0" step="0.01" data-li="qty" value="${li.qty}" style="min-width:80px;"></td>
@@ -3876,6 +3904,7 @@ function openTxnForm(txnId, prefill){
         <button type="button" class="btn secondary sm" data-addn="1">+ Add 1 Line</button>
         <button type="button" class="btn secondary sm" data-addn="5">+ Add 5 Lines</button>
         <button type="button" class="btn secondary sm" data-addn="10">+ Add 10 Lines</button>
+        <button type="button" class="btn secondary sm" id="addHeadingBtn" title="A bold group title, like A / B / C in your invoice sheet">+ Add Heading</button>
       </div>`;
     document.querySelectorAll('[data-li]').forEach(inp=>{
       if(inp.dataset.li==='rate'){
@@ -3917,25 +3946,35 @@ function openTxnForm(txnId, prefill){
     });
     document.querySelectorAll('[data-rmline]').forEach(b=> b.onclick=()=>{ txnLineItems.splice(Number(b.dataset.rmline),1); if(!txnLineItems.length) txnLineItems.push(blankLineItem()); drawLineItems(); drawTotalsPreview(); });
     document.querySelectorAll('[data-addn]').forEach(b=> b.onclick=()=>{ const n=Number(b.dataset.addn); for(let k=0;k<n;k++) txnLineItems.push(blankLineItem()); drawLineItems(); drawTotalsPreview(); });
+    const hb = document.getElementById('addHeadingBtn'); if(hb) hb.onclick = ()=>{ txnLineItems.push(blankHeading()); drawLineItems(); drawTotalsPreview(); };
   }
   function drawTotalsPreview(){
     const gstMode = document.getElementById('txnGstMode').value;
     const currency = document.getElementById('txnCurrency').value;
     const exchRate = Number(document.getElementById('txnExchRate').value)||1;
     const sym = CURRENCY_SYMBOLS[currency]||'₹';
-    const tot = calcTxnTotals({ items:txnLineItems, gstMode, exchRate });
+    const tot = calcTxnTotals({ items:txnLineItems, gstMode, exchRate, otherCharges:document.getElementById('txnOtherCharges').value, otherChargesGstPct:document.getElementById('txnOtherChargesGst').value, roundOff:document.getElementById('txnRoundOff').value });
     document.getElementById('txnTotalsPreview').innerHTML = `
       <div class="divider"></div>
       <div class="grid cols-4">
         <div><label>Subtotal</label><div><b>${sym}${moneyPlain2(tot.subtotal)}</b></div></div>
+        ${tot.otherCharges?`<div><label>Other Charges</label><div>${sym}${moneyPlain2(tot.otherCharges)}</div></div>`:''}
         ${gstMode==='Intra'?`<div><label>CGST</label><div>${sym}${moneyPlain2(tot.cgst)}</div></div><div><label>SGST</label><div>${sym}${moneyPlain2(tot.sgst)}</div></div>`:''}
         ${gstMode==='Inter'?`<div><label>IGST</label><div>${sym}${moneyPlain2(tot.igst)}</div></div>`:''}
+        ${tot.roundOff?`<div><label>Round Off</label><div>${sym}${moneyPlain2(tot.roundOff)}</div></div>`:''}
         <div><label>Grand Total</label><div><b>${sym}${moneyPlain2(tot.grandTotal)}</b></div></div>
       </div>
       ${currency!=='INR' ? `<div class="hint" style="margin-top:6px;">Grand Total in INR (at ${exchRate}): <b>${money2(tot.grandTotalINR)}</b></div>` : ''}`;
   }
   document.getElementById('txnGstMode').addEventListener('change', ()=>{ drawLineItems(); drawTotalsPreview(); });
   document.getElementById('txnExchRate').addEventListener('input', drawTotalsPreview);
+  ['txnOtherCharges','txnOtherChargesGst','txnRoundOff'].forEach(id=> document.getElementById(id).addEventListener('input', drawTotalsPreview));
+  document.getElementById('txnAutoRound').onclick = ()=>{
+    const gstMode = document.getElementById('txnGstMode').value;
+    const tot = calcTxnTotals({ items:txnLineItems, gstMode, otherCharges:document.getElementById('txnOtherCharges').value, otherChargesGstPct:document.getElementById('txnOtherChargesGst').value, roundOff:0 });
+    document.getElementById('txnRoundOff').value = (Math.round(tot.grandTotal) - tot.grandTotal).toFixed(2);
+    drawTotalsPreview();
+  };
   drawLineItems(); drawTotalsPreview();
 
   document.getElementById('txnForm').onsubmit = async (ev)=>{
@@ -3956,7 +3995,7 @@ function openTxnForm(txnId, prefill){
 async function submitTxnForm(ev, isEdit, t){
   const fd = new FormData(ev.target);
   const party = PARTIES.find(p=>p.id===fd.get('partyId'));
-  const items = txnLineItems.filter(li=> li.description.trim() || Number(li.qty) || Number(li.rate));
+  const items = txnLineItems.filter(li=> li.description.trim() || (li.kind!=='heading' && (Number(li.qty) || Number(li.rate))));
   const rec = {
     id: t.id||uid(), txnCategory: fd.get('txnCategory'), txnDirection: fd.get('txnDirection'),
     partyId: fd.get('partyId'), partyName: party?party.partyName:'',
@@ -3972,6 +4011,7 @@ async function submitTxnForm(ev, isEdit, t){
     fundReceivedDate: fd.get('fundReceivedDate')||t.fundReceivedDate||'', fundReceivedVia: (fd.get('fundReceivedVia')||t.fundReceivedVia||'').trim(),
     linkedInvoice: t.linkedInvoice||'', linkedProforma: t.linkedProforma||'',
     linkedInvoiceGST: t.linkedInvoiceGST||'', linkedInvoiceNonGST: t.linkedInvoiceNonGST||'', linkedProformas: t.linkedProformas||[],
+    otherCharges: Number(fd.get('otherCharges'))||0, otherChargesGstPct: Number(fd.get('otherChargesGstPct'))||0, roundOff: Number(fd.get('roundOff'))||0,
     terms: fd.get('terms').trim(), notes: fd.get('notes').trim(), items,
     revisionNo: t.revisionNo||0, revisionHistory: t.revisionHistory||[]
   };
@@ -4480,7 +4520,7 @@ function openConsolidateProformaModal(){
       TRANSACTIONS.push(rec);
       return rec;
     }
-    const gstInvoice = await createInvoice(gstItems, 'Intra', 'GST Invoice (Domestic)');
+    const gstInvoice = await createInvoice(gstItems, 'Inter', 'GST Invoice (Domestic)');
     const nonGstInvoice = await createInvoice(nonGstItems, 'None', 'Non-GST Invoice (Export)');
     await saveOrg();
 
@@ -4560,15 +4600,33 @@ function openTxnPrint(id){
           ${party?`<tr><td class="lbl">PARTY GST / PAN</td><td class="val">${esc(party.gstNumber||'—')} / ${esc(party.panNumber||'—')}</td><td class="lbl">PARTY ADDRESS</td><td class="val" style="white-space:pre-wrap;">${esc(party.address||'—')}</td></tr>`:''}
           ${detailRows.map(r=>`<tr><td class="lbl">${esc(r[0])}</td><td class="val">${esc(r[1]||'—')}</td><td class="lbl">${esc(r[2])}</td><td class="val">${esc(r[3]||'—')}</td></tr>`).join('')}
         </table>
-        <table class="pstable items-table" style="margin-top:-1px;">
-          <tr class="earnhead"><td>DESCRIPTION</td><td>HSN</td><td>QTY</td><td>UOM</td><td>COST/UNIT</td><td>DISC%</td><td>GST%</td><td class="amtcell">TAXABLE AMT</td></tr>
-          ${(t.items||[]).map(li=>{ const effGstPct = t.gstMode==='None' ? 0 : (Number(li.gstPct)||0); return `<tr><td class="val" style="white-space:pre-wrap;">${esc(li.description)}</td><td class="val">${esc(li.hsn||'—')}</td><td class="val">${li.qty}</td><td class="val">${esc(li.uom||'NOS')}</td><td class="val amtcell">${sym}${moneyPlain2(li.rate)}</td><td class="val">${li.discountPct||0}%</td><td class="val">${effGstPct}%</td><td class="val amtcell">${sym}${moneyPlain2(calcLineAmount(li))}</td></tr>`; }).join('')}
-          <tr class="totrow"><td colspan="7">SUBTOTAL</td><td class="amtcell">${sym}${moneyPlain2(tot.subtotal)}</td></tr>
-          ${t.gstMode==='Intra'?`<tr><td colspan="7">CGST</td><td class="amtcell">${sym}${moneyPlain2(tot.cgst)}</td></tr><tr><td colspan="7">SGST</td><td class="amtcell">${sym}${moneyPlain2(tot.sgst)}</td></tr>`:''}
-          ${t.gstMode==='Inter'?`<tr><td colspan="7">IGST</td><td class="amtcell">${sym}${moneyPlain2(tot.igst)}</td></tr>`:''}
-          <tr class="netrow"><td colspan="7">GRAND TOTAL</td><td class="amtcell">${sym}${moneyPlain2(tot.grandTotal)}</td></tr>
-          <tr class="wordsrow"><td colspan="8"><span class="wlabel">Amount in words:</span> ${esc(amountInWords(tot.grandTotal, t.currency||'INR'))}</td></tr>
-        </table>
+        ${(()=>{
+          const mode = t.gstMode, serials = lineSerials(t.items||[]);
+          const taxCols = mode==='Inter' ? 2 : (mode==='Intra' ? 4 : 0);
+          const nCols = 8 + taxCols;
+          const m2 = n => sym+moneyPlain2(n);
+          const taxHead = mode==='Inter' ? '<td>IGST %</td><td class="amtcell">IGST AMT</td>' : (mode==='Intra' ? '<td>CGST %</td><td class="amtcell">CGST AMT</td><td>SGST %</td><td class="amtcell">SGST AMT</td>' : '');
+          const rows = (t.items||[]).map((li,i)=>{
+            if(li.kind==='heading') return `<tr><td class="val"><b>${serials[i]}</b></td><td class="val" colspan="${nCols-1}" style="white-space:pre-wrap;font-weight:800;background:#F4F6FA;">${esc(li.description)}</td></tr>`;
+            const taxable = calcLineAmount(li), pct = mode==='None' ? 0 : (Number(li.gstPct)||0), tax = taxable*pct/100;
+            const taxCells = mode==='Inter' ? `<td class="val">${pct}%</td><td class="val amtcell">${m2(tax)}</td>`
+              : (mode==='Intra' ? `<td class="val">${pct/2}%</td><td class="val amtcell">${m2(tax/2)}</td><td class="val">${pct/2}%</td><td class="val amtcell">${m2(tax/2)}</td>` : '');
+            return `<tr><td class="val">${serials[i]}</td><td class="val" style="white-space:pre-wrap;">${esc(li.description)}</td><td class="val">${esc(li.hsn||'—')}</td><td class="val">${li.qty}</td><td class="val">${esc(li.uom||'NOS')}</td><td class="val amtcell">${m2(li.rate)}</td><td class="val">${li.discountPct||0}%</td><td class="val amtcell">${m2(taxable)}</td>${taxCells}</tr>`;
+          }).join('');
+          const blanks = n => '<td></td>'.repeat(n);
+          const taxTot = mode==='Inter' ? `<td></td><td class="amtcell">${m2(tot.igst)}</td>` : (mode==='Intra' ? `<td></td><td class="amtcell">${m2(tot.cgst)}</td><td></td><td class="amtcell">${m2(tot.sgst)}</td>` : '');
+          return `<table class="pstable items-table" style="margin-top:-1px;">
+          <tr class="earnhead"><td>S.NO</td><td>DESCRIPTION</td><td>HSN / SAC</td><td>QTY</td><td>UOM</td><td>COST/UNIT</td><td>DISC%</td><td class="amtcell">TAXABLE AMT</td>${taxHead}</tr>
+          ${rows}
+          ${tot.otherCharges?(()=>{ const op = mode==='None' ? 0 : (Number(t.otherChargesGstPct)||0), ot = tot.otherCharges*op/100;
+            const oc = mode==='Inter' ? `<td>${op}%</td><td class="amtcell">${m2(ot)}</td>` : (mode==='Intra' ? `<td>${op/2}%</td><td class="amtcell">${m2(ot/2)}</td><td>${op/2}%</td><td class="amtcell">${m2(ot/2)}</td>` : '');
+            return `<tr><td></td><td colspan="6"><b>Other Charges</b></td><td class="amtcell">${m2(tot.otherCharges)}</td>${oc}</tr>`; })():''}
+          <tr class="totrow"><td colspan="7">SUB TOTAL</td><td class="amtcell">${m2(tot.subtotal+tot.otherCharges)}</td>${taxTot}</tr>
+          ${tot.roundOff?`<tr><td colspan="${nCols-1}">ROUND OFF</td><td class="amtcell">${m2(tot.roundOff)}</td></tr>`:''}
+          <tr class="netrow"><td colspan="${nCols-1}">GRAND TOTAL${isForeign?` (${esc(t.currency)})`:''}</td><td class="amtcell">${m2(tot.grandTotal)}</td></tr>
+          <tr class="wordsrow"><td colspan="${nCols}"><span class="wlabel">Amount in words:</span> ${esc(amountInWords(tot.grandTotal, t.currency||'INR'))}</td></tr>
+        </table>`;
+        })()}
         ${t.terms?`<div class="regime-note"><b>Terms &amp; Conditions:</b> ${esc(t.terms)}</div>`:''}
         ${t.notes?`<div class="regime-note"><b>Notes:</b> ${esc(t.notes)}</div>`:''}
         <div class="payslip-foot"><span>${esc(t.txnNo)}${t.revisionNo?' — Revision '+t.revisionNo:''}</span><span>ELECTRONIC DOCUMENT</span></div>
@@ -4816,6 +4874,10 @@ function taxComplianceData(year, month){
   const invoiceTxns = TRANSACTIONS.filter(t=> t.txnCategory==='INVOICE' && t.txnDate>=monthStart && t.txnDate<nextMonthDate);
   const gstOutput = round2(invoiceTxns.reduce((s,t)=> s+calcTxnTotals(t).taxAmountINR, 0));
   const gstPayable = round2(gstOutput - gstInputExpenses);
+  // The same GST output in each invoice's own currency (e.g. USD), shown beside the INR figure.
+  const gstOutputByCcy = {};
+  invoiceTxns.forEach(t=>{ const c = t.currency||'INR'; if(c==='INR') return; const x = calcTxnTotals(t).taxAmount; if(x) gstOutputByCcy[c] = round2((gstOutputByCcy[c]||0)+x); });
+  const gstOutputCcyText = Object.keys(gstOutputByCcy).map(c=> c+' '+moneyPlain2(gstOutputByCcy[c])).join(', ');
 
   // TDS deposit deadline: 7th of the month AFTER the deduction month.
   const deadlineYear = month===12 ? year+1 : year;
@@ -4825,7 +4887,7 @@ function taxComplianceData(year, month){
   const overdueDays = Math.floor((today - deadline) / 86400000);
 
   return { period, salaryTds, bySection, lineItems, totalsByReportCode, noTdsItems, assessmentYear, totalTdsToDeposit, tdsReceivable, receivableCount:receivableTxns.length,
-    gstInputExpenses, expensesCount:expensesThisMonth.length, gstOutput, gstPayable, deadline, overdueDays };
+    gstInputExpenses, expensesCount:expensesThisMonth.length, gstOutput, gstOutputCcyText, gstPayable, deadline, overdueDays };
 }
 function renderTaxCompliance(c, actions){
   actions.innerHTML = '';
@@ -4939,7 +5001,7 @@ function renderTaxCompliance(c, actions){
     <div class="card" style="margin-top:14px;background:linear-gradient(135deg,#7C3AED,#DB2777);color:#fff;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
       <div>
         <h2 style="color:#fff;margin:0;">🧾 GST Reconciliation — ${esc(monthLabel)} ${taxComplianceYear}</h2>
-        <p style="color:rgba(255,255,255,.85);font-size:12.5px;margin:2px 0 0;">Output ${money(d.gstOutput)} − Input Credit ${money(d.gstInputExpenses)} — GSTR-3B typically due by the 20th of next month</p>
+        <p style="color:rgba(255,255,255,.85);font-size:12.5px;margin:2px 0 0;">Output ${money(d.gstOutput)}${d.gstOutputCcyText?` (invoiced as ${esc(d.gstOutputCcyText)})`:''} − Input Credit ${money(d.gstInputExpenses)} — GSTR-3B typically due by the 20th of next month</p>
       </div>
       <div style="text-align:right;">
         <div style="font-size:22px;font-weight:800;">${money(d.gstPayable)}</div>
