@@ -5277,12 +5277,13 @@ function openMarkBillPaid(billId){
     <div class="field"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
     <div class="field"><label>Amount ₹</label><input type="number" step="0.01" name="amount" value="${Math.max(0,round2(t.balance))}" required></div>
     <div class="field"><label>Mode</label><select name="mode"><option>Bank Transfer</option><option>Net banking</option><option>UPI</option><option>Cheque</option><option>Cash</option></select></div>
-    <div class="field"><label>Reference / challan no.</label><input name="ref"></div></div>
+    <div class="field"><label>Reference / challan no.</label><input name="ref"></div>
+    <div class="field"><label>Paid from account</label><select name="bank">${bankAcctOptions(bankAcct&&bankAcct!=='all'?bankAcct:bankAccounts()[0].id)}</select></div></div>
     <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
   document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
-  document.getElementById('mbpForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); if(!bankGuardDate(fd.get('date'))) return;
+  document.getElementById('mbpForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); if(!bankGuardDate(fd.get('date'), fd.get('bank'))) return;
     const list = billPayments(e).filter(x=>!x.legacy).slice(); if(!list.length && (Number(e.paidAmount)||0)>0) list.push(billPayments(e)[0]);
-    list.push({id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'', bank:''});
+    list.push({id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'', bank:fd.get('bank')});
     e.paymentsMade = list.map(x=>Object.assign({},x,{legacy:undefined}));
     e.paidAmount = round2(list.reduce((s,x)=>s+(Number(x.amount)||0),0));
     const last = list[list.length-1]; e.paymentDate=last.date; e.paymentMode=last.mode; e.paymentRef=last.ref;
@@ -5349,10 +5350,24 @@ function bindStatutory(c, d, pf, esic){
    Money out: bill payments (incl. PF / ESIC / TDS / GST statutory bills) and salary.
    A period is verified against the bank statement and then locked. */
 const BANK_DEFAULT_START = '2026-04-01';
-let bankFrom = '', bankTo = '', bankView = 'all';
+let bankFrom = '', bankTo = '', bankView = 'all', bankAcct = '';
+/* Bank accounts: ORG.bankAccounts, or one virtual "main" account built from the Company Details bank + opening balance. */
+function bankAccounts(){
+  const l=(ORG.bankAccounts||[]);
+  if(l.length) return l;
+  return [{id:'main', name:ORG.bankName||'Main account', accNo:ORG.bankAccNo||'', opening:Number(ORG.bankOpening&&ORG.bankOpening.amount)||0}];
+}
+function bankResolve(v){
+  const l=bankAccounts(); if(!v) return l[0].id;
+  const s=String(v).trim().toLowerCase();
+  const x=l.find(a=>a.id===v) || l.find(a=>(a.name||'').trim().toLowerCase()===s) || l.find(a=>a.accNo && s.indexOf(String(a.accNo).toLowerCase())>=0);
+  return x?x.id:l[0].id;
+}
+function bankAcctName(id){ const a=bankAccounts().find(x=>x.id===id); return a?(a.name||'Account'):'—'; }
+function bankAcctOptions(sel, withAll){ return (withAll?`<option value="all" ${sel==='all'?'selected':''}>All accounts</option>`:'')+bankAccounts().map(a=>`<option value="${esc(a.id)}" ${sel===a.id?'selected':''}>${esc(a.name||'Account')}${a.accNo?' ···'+esc(String(a.accNo).slice(-4)):''}</option>`).join(''); }
 function bankStart(){ return (ORG.bankStartDate || BANK_DEFAULT_START); }
-function bankLastVerified(){ const l=BANK_RECONS.filter(r=>!r.unlocked).sort((a,b)=>a.to<b.to?-1:1); return l.length?l[l.length-1]:null; }
-function bankLockedThrough(){ const r=bankLastVerified(); return r?r.to:''; }
+function bankLastVerified(acct){ const id=bankResolve(acct); const l=BANK_RECONS.filter(r=>!r.unlocked && bankResolve(r.accountId)===id).sort((a,b)=>a.to<b.to?-1:1); return l.length?l[l.length-1]:null; }
+function bankLockedThrough(acct){ const r=bankLastVerified(acct); return r?r.to:''; }
 function dayAdd(d, n){ const x=new Date(d+'T00:00:00'); x.setDate(x.getDate()+n); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); }
 function invoiceNetReceivable(t){
   const cn = TRANSACTIONS.filter(x=>x.txnCategory==='CREDIT_NOTE' && x.reference && x.reference===t.txnNo).reduce((s,x)=>s+calcTxnTotals(x).grandTotalINR,0);
@@ -5371,14 +5386,14 @@ function bankEntries(){
   const st = bankStart(), out = [];
   TRANSACTIONS.filter(t=>t.txnCategory==='INVOICE').forEach(t=>{
     invoicePayments(t).forEach(p=>{ if((p.date||'')<st || !(Number(p.amount)>0)) return;
-      out.push({ date:p.date, dir:'in', amount:Number(p.amount), desc:`Invoice ${t.txnNo} — ${t.partyName||''}`, mode:p.mode||'', ref:p.ref||'', src:'Invoice', assumed:!!p.legacy, srcId:t.id, payId:p.id }); });
+      out.push({ date:p.date, dir:'in', amount:Number(p.amount), desc:`Invoice ${t.txnNo} — ${t.partyName||''}`, mode:p.mode||'', ref:p.ref||'', src:'Invoice', assumed:!!p.legacy, srcId:t.id, payId:p.id, acct:bankResolve(p.bank) }); });
   });
   const salaryBillMonths = new Set(EXPENSES.filter(e=>e.billType==='SALARY' && billPayments(e).length).map(e=>e.salaryMonth).filter(Boolean));
   EXPENSES.filter(e=>e.billType!=='INTERBANK').forEach(e=>{
     billPayments(e).forEach(p=>{
       const date = p.date || e.billDate || ''; if(date<st || !(Number(p.amount)>0)) return;
       const type = e.billType==='STATUTORY' ? (e.statutoryType||'Statutory') : (e.billType==='SALARY'?'Salary':'Bill');
-      out.push({ date, dir:'out', amount:Number(p.amount), desc:`${e.voucherNo||''} — ${e.billType==='SALARY'?(e.employeeName||'Salary'):e.billType==='STATUTORY'?(e.description||type):(e.vendorName||e.description||'')}`, mode:p.mode||'', ref:p.ref||'', src:type, assumed:!!p.legacy && !e.paymentDate, srcId:e.id, payId:p.id });
+      out.push({ date, dir:'out', amount:Number(p.amount), desc:`${e.voucherNo||''} — ${e.billType==='SALARY'?(e.employeeName||'Salary'):e.billType==='STATUTORY'?(e.description||type):(e.vendorName||e.description||'')}`, mode:p.mode||'', ref:p.ref||'', src:type, assumed:!!p.legacy && !e.paymentDate, srcId:e.id, payId:p.id, acct:bankResolve(p.bank) });
     });
   });
   // Salary from payslips (assumed paid on month-end) unless a Salary bill already tracks that month.
@@ -5390,32 +5405,43 @@ function bankEntries(){
     if(date<st) return;
     const latest = {}; byPeriod[per].forEach(p=>{ if(!latest[p.empId] || new Date(p.generatedAt||0)>new Date(latest[p.empId].generatedAt||0)) latest[p.empId]=p; });
     const total = round2(Object.values(latest).reduce((s,p)=>s+(Number(p.netPay)||0),0));
-    if(total>0) out.push({ date, dir:'out', amount:total, desc:`Salary ${gstPeriodLabel(per)} (${Object.keys(latest).length} staff, net pay)`, mode:'', ref:'', src:'Salary', assumed:true, srcId:'sal-'+per });
+    if(total>0) out.push({ date, dir:'out', amount:total, desc:`Salary ${gstPeriodLabel(per)} (${Object.keys(latest).length} staff, net pay)`, mode:'', ref:'', src:'Salary', assumed:true, srcId:'sal-'+per, acct:bankResolve(ORG.salaryBankAccount) });
   });
-  OTHER_INCOME.forEach(o=>{ if((o.date||'')<st) return; out.push({ date:o.date, dir:'in', amount:Number(o.amount)||0, desc:`${o.type||'Other income'}${o.note?' — '+o.note:''}`, mode:o.mode||'', ref:o.ref||'', src:'Other income', assumed:false, srcId:o.id, other:true }); });
+  OTHER_INCOME.forEach(o=>{ if((o.date||'')<st) return; out.push({ date:o.date, dir:'in', amount:Number(o.amount)||0, desc:`${o.type||'Other income'}${o.note?' — '+o.note:''}`, mode:o.mode||'', ref:o.ref||'', src:'Other income', assumed:false, srcId:o.id, other:true, acct:bankResolve(o.bank) }); });
+  // Transfers between own accounts: out of one, into the other (skipped when both legs resolve to the same account).
+  EXPENSES.filter(e=>e.billType==='INTERBANK').forEach(e=>{
+    const date=e.billDate||''; const amt=Number(e.transferAmount)||0; if(date<st||!(amt>0)) return;
+    const f=bankResolve(e.fromBankName), t=bankResolve(e.toBankName); if(f===t) return;
+    out.push({ date, dir:'out', amount:amt, desc:`Transfer to ${bankAcctName(t)}${e.paymentRef?' — '+e.paymentRef:''}`, mode:'', ref:e.voucherNo||'', src:'Transfer', transfer:true, assumed:false, srcId:e.id, acct:f });
+    out.push({ date, dir:'in', amount:amt, desc:`Transfer from ${bankAcctName(f)}${e.paymentRef?' — '+e.paymentRef:''}`, mode:'', ref:e.voucherNo||'', src:'Transfer', transfer:true, assumed:false, srcId:e.id, acct:t });
+  });
   return out.sort((a,b)=> a.date<b.date?-1: a.date>b.date?1: (a.dir==='in'?-1:1));
 }
-function bankOpeningBase(){ return Number(ORG.bankOpening&&ORG.bankOpening.amount)||0; }
-/* Opening balance on `from`: last verified statement closing if it ends the day before, else base + book movements before it. */
-function bankOpeningOn(from, entries){
-  const lv = BANK_RECONS.filter(r=>!r.unlocked && dayAdd(r.to,1)<=from).sort((a,b)=>a.to<b.to?-1:1).pop();
-  let bal = lv ? Number(lv.statementBalance) : bankOpeningBase();
+function bankAcctOpening(id){ const a=bankAccounts().find(x=>x.id===id); return a?(Number(a.opening)||0):0; }
+/* Opening balance of one account on `from`: last verified statement closing if it ends before, else opening + book movements before it. */
+function bankOpeningOn(from, entries, id){
+  const lv = BANK_RECONS.filter(r=>!r.unlocked && bankResolve(r.accountId)===id && dayAdd(r.to,1)<=from).sort((a,b)=>a.to<b.to?-1:1).pop();
+  let bal = lv ? Number(lv.statementBalance) : bankAcctOpening(id);
   const since = lv ? dayAdd(lv.to,1) : '';
-  entries.forEach(e=>{ if(e.date<from && (!since || e.date>=since)) bal += e.dir==='in'?e.amount:-e.amount; });
+  entries.forEach(e=>{ if(e.acct===id && e.date<from && (!since || e.date>=since)) bal += e.dir==='in'?e.amount:-e.amount; });
   return { bal:round2(bal), fromVerified:lv };
 }
-function bankDefaultRange(){
-  const lt = bankLockedThrough(); const today = new Date().toISOString().slice(0,10);
+function bankDefaultRange(acct){
+  const today = new Date().toISOString().slice(0,10);
+  const lt = (acct && acct!=='all') ? bankLockedThrough(acct) : '';
   const from = lt ? dayAdd(lt,1) : bankStart();
   return [from, today<from?from:today];
 }
-function bankLedger(from, to){
-  const all = bankEntries(); const op = bankOpeningOn(from, all);
-  let bal = op.bal; const rows = all.filter(e=>e.date>=from && e.date<=to).map(e=>{ bal = round2(bal + (e.dir==='in'?e.amount:-e.amount)); return Object.assign({}, e, {balance:bal}); });
-  const totIn = round2(rows.filter(r=>r.dir==='in').reduce((s,r)=>s+r.amount,0)), totOut = round2(rows.filter(r=>r.dir==='out').reduce((s,r)=>s+r.amount,0));
-  return { opening:op.bal, openingVerified:op.fromVerified, rows, totIn, totOut, closing:round2(op.bal+totIn-totOut) };
+function bankLedger(from, to, acct){
+  const all = bankEntries(); const ids = (acct && acct!=='all') ? [acct] : bankAccounts().map(a=>a.id);
+  let opening=0, ver=null; ids.forEach(id=>{ const o=bankOpeningOn(from, all, id); opening+=o.bal; if(ids.length===1) ver=o.fromVerified; });
+  opening = round2(opening);
+  let bal = opening; const rows = all.filter(e=>e.date>=from && e.date<=to && ids.includes(e.acct)).map(e=>{ bal = round2(bal + (e.dir==='in'?e.amount:-e.amount)); return Object.assign({}, e, {balance:bal}); });
+  const real = ids.length>1 ? rows.filter(r=>!r.transfer) : rows;   // across all accounts, own transfers are not income or spending
+  const totIn = round2(real.filter(r=>r.dir==='in').reduce((s,r)=>s+r.amount,0)), totOut = round2(real.filter(r=>r.dir==='out').reduce((s,r)=>s+r.amount,0));
+  return { opening, openingVerified:ver, rows, totIn, totOut, closing:round2(opening+totIn-totOut), acct:(acct&&acct!=='all')?acct:'all' };
 }
-function bankGuardDate(d){ const lt=bankLockedThrough(); if(lt && d<=lt){ toast(`Bank period up to ${lt} is verified and locked — unlock it first.`, true); return false; } return true; }
+function bankGuardDate(d, acct){ const lt=bankLockedThrough(acct); if(lt && d<=lt){ toast(`${bankAcctName(bankResolve(acct))}: period up to ${lt} is verified and locked — unlock it first.`, true); return false; } return true; }
 function openInvoicePaymentModal(){
   const open = TRANSACTIONS.filter(t=>t.txnCategory==='INVOICE' && t.status!=='Draft' && (t.txnDate||'')>=bankStart().slice(0,0)).map(t=>{ const n=invoiceNetReceivable(t); const rec=invoicePayments(t).reduce((s,p)=>s+(Number(p.amount)||0),0); return {t,n,rec,left:round2(n.net-rec)}; }).filter(x=>x.left>0.5 || !x.t.paymentsReceived);
   openModal(`<div class="modal-head"><h3>Invoice payment received</h3><button class="modal-close" id="mClose">✕</button></div>
@@ -5424,15 +5450,16 @@ function openInvoicePaymentModal(){
     <div class="field"><label>Date received</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
     <div class="field"><label>Amount credited in bank ₹</label><input type="number" step="0.01" name="amount" id="ipAmt" required></div>
     <div class="field"><label>Mode</label><select name="mode"><option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Cash</option><option>Foreign remittance</option></select></div>
-    <div class="field"><label>Reference / UTR</label><input name="ref"></div></div>
+    <div class="field"><label>Reference / UTR</label><input name="ref"></div>
+    <div class="field"><label>Credited to account</label><select name="bank">${bankAcctOptions(bankAcct&&bankAcct!=='all'?bankAcct:bankAccounts()[0].id)}</select></div></div>
     <p class="hint">Client TDS and credit notes are not part of the bank credit — enter only what reached the bank.</p>
     <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
   document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
   document.getElementById('ipInv').onchange=e=>{ const o=e.target.selectedOptions[0]; document.getElementById('ipAmt').value = o&&o.dataset.left?Math.max(0,Number(o.dataset.left)):''; };
   document.getElementById('ipForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); const t=TRANSACTIONS.find(x=>x.id===fd.get('inv')); if(!t) return;
-    if(!bankGuardDate(fd.get('date'))) return;
+    if(!bankGuardDate(fd.get('date'), fd.get('bank'))) return;
     const list = Array.isArray(t.paymentsReceived)?t.paymentsReceived.slice():[];
-    list.push({id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'', bank:ORG.bankName||''});
+    list.push({id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'', bank:fd.get('bank')});
     t.paymentsReceived = list; tagRecord(t,false); await saveTransactions(); closeModal(); toast('Payment recorded.'); render(); };
 }
 function openOtherIncomeModal(){
@@ -5442,11 +5469,12 @@ function openOtherIncomeModal(){
     <div class="field"><label>Amount ₹</label><input type="number" step="0.01" name="amount" required></div>
     <div class="field"><label>Type</label><select name="type"><option>Bank interest</option><option>FD interest / maturity</option><option>Refund</option><option>Other</option></select></div>
     <div class="field"><label>Reference</label><input name="ref"></div>
+    <div class="field"><label>Account</label><select name="bank">${bankAcctOptions(bankAcct&&bankAcct!=='all'?bankAcct:bankAccounts()[0].id)}</select></div>
     <div class="field" style="grid-column:1/-1"><label>Note</label><input name="note"></div></div>
     <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
   document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
-  document.getElementById('oiForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); if(!bankGuardDate(fd.get('date'))) return;
-    const rec={id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, type:fd.get('type'), ref:fd.get('ref')||'', note:fd.get('note')||'', mode:'Bank'}; tagRecord(rec,true);
+  document.getElementById('oiForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); if(!bankGuardDate(fd.get('date'), fd.get('bank'))) return;
+    const rec={id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, type:fd.get('type'), ref:fd.get('ref')||'', note:fd.get('note')||'', mode:'Bank', bank:fd.get('bank')}; tagRecord(rec,true);
     OTHER_INCOME.push(rec); await saveOtherIncome(); closeModal(); toast('Other income recorded.'); render(); };
 }
 function openBillPaymentPicker(){
@@ -5459,66 +5487,71 @@ function openBillPaymentPicker(){
 }
 function renderBank(c, actions){
   const ed = canEdit();
-  actions.innerHTML = ed ? `<button class="btn" id="bkInv">+ Invoice payment</button> <button class="btn secondary" id="bkBill">+ Bill payment</button> <button class="btn secondary" id="bkOth">+ Other income</button>` : '';
-  if(!bankFrom || !bankTo){ [bankFrom, bankTo] = bankDefaultRange(); }
-  const L = bankLedger(bankFrom, bankTo);
-  const lv = bankLastVerified(); const lt = bankLockedThrough();
-  const hist = BANK_RECONS.slice().sort((a,b)=>a.to<b.to?1:-1);
+  actions.innerHTML = ed ? `<button class="btn" id="bkInv">+ Invoice payment</button> <button class="btn secondary" id="bkBill">+ Bill payment</button> <button class="btn secondary" id="bkOth">+ Other income</button> <button class="btn secondary" id="bkTr">⇄ Transfer</button>` : '';
+  const accts = bankAccounts();
+  if(!bankAcct || (bankAcct!=='all' && !accts.some(a=>a.id===bankAcct))) bankAcct = accts.length>1 ? 'all' : accts[0].id;
+  const specific = bankAcct!=='all';
+  if(!bankFrom || !bankTo){ [bankFrom, bankTo] = bankDefaultRange(bankAcct); }
+  const L = bankLedger(bankFrom, bankTo, bankAcct);
+  const lv = specific ? bankLastVerified(bankAcct) : null; const lt = specific ? bankLockedThrough(bankAcct) : '';
+  const hist = BANK_RECONS.filter(r=>!specific || bankResolve(r.accountId)===bankAcct).sort((a,b)=>a.to<b.to?1:-1);
   const view = r=> bankView==='all' || (bankView==='in'&&r.dir==='in') || (bankView==='out'&&r.dir==='out');
   c.innerHTML = `
    <div class="card">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+      <div class="field"><label>Account</label><select id="bkAcct">${bankAcctOptions(bankAcct,true)}</select></div>
       <div class="field"><label>From</label><input type="date" id="bkFrom" value="${bankFrom}"></div>
       <div class="field"><label>To</label><input type="date" id="bkTo" value="${bankTo}"></div>
       <div class="field"><label>Show</label><select id="bkView"><option value="all" ${bankView==='all'?'selected':''}>All</option><option value="in" ${bankView==='in'?'selected':''}>Income (received)</option><option value="out" ${bankView==='out'?'selected':''}>Spending (paid)</option></select></div>
       <button class="btn secondary sm" id="bkNext">Next unverified period</button>
       <button class="btn secondary sm" id="bkPdf">📄 Ledger PDF</button>
-      ${ed?`<span style="margin-left:auto;">Opening balance ₹ <input id="bkOpenAmt" type="number" step="0.01" value="${bankOpeningBase()}" style="width:120px;padding:6px;border:1px solid var(--rule);border-radius:8px;"> on <input id="bkStartDate" type="date" value="${bankStart()}" style="padding:6px;border:1px solid var(--rule);border-radius:8px;"> <button class="btn secondary sm" id="bkOpenSave">Save</button></span>`:''}
+      ${ed?`<span style="margin-left:auto;">Bank start date <input id="bkStartDate" type="date" value="${bankStart()}" style="padding:6px;border:1px solid var(--rule);border-radius:8px;"> <button class="btn secondary sm" id="bkOpenSave">Save</button> <button class="btn secondary sm" id="bkAccts">🏦 Manage accounts</button></span>`:''}
     </div>
     <div class="grid cols-4" style="gap:12px;margin-top:12px;">
       <div class="stat" style="background:var(--g-blue);"><div class="n">${money(L.opening)}</div><div class="l">Opening${L.openingVerified?' (verified '+esc(L.openingVerified.to)+')':''}</div></div>
-      <div class="stat" style="background:var(--g-green);"><div class="n">${money(L.totIn)}</div><div class="l">Income received</div></div>
-      <div class="stat" style="background:var(--g-red);"><div class="n">${money(L.totOut)}</div><div class="l">Spending paid</div></div>
+      <div class="stat" style="background:var(--g-green);"><div class="n">${money(L.totIn)}</div><div class="l">Income received${specific?'':' (excl. own transfers)'}</div></div>
+      <div class="stat" style="background:var(--g-red);"><div class="n">${money(L.totOut)}</div><div class="l">Spending paid${specific?'':' (excl. own transfers)'}</div></div>
       <div class="stat" style="background:var(--g-orange);"><div class="n">${money(L.closing)}</div><div class="l">Closing (books)</div></div>
     </div>
     ${lt?`<p class="hint">🔒 Verified and locked up to <b>${esc(lt)}</b>. Entries on or before this date cannot be added.</p>`:''}
-    <div style="overflow-x:auto;margin-top:8px;"><table><thead><tr><th>Date</th><th>Particulars</th><th>Type</th><th>Mode / Ref</th><th class="num-cell">Received</th><th class="num-cell">Paid</th><th class="num-cell">Balance</th></tr></thead><tbody>
-     <tr><td>${esc(bankFrom)}</td><td colspan="5"><i>Opening balance</i></td><td class="num-cell">${money2(L.opening)}</td></tr>
-     ${L.rows.filter(view).map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.desc)}${r.assumed?' <span class="pill neutral" title="No payment date recorded — using the document date">assumed date</span>':''}</td><td>${esc(r.src)}</td><td style="color:var(--muted);">${esc((r.mode+' '+r.ref).trim())}</td>
+    <div style="overflow-x:auto;margin-top:8px;"><table><thead><tr><th>Date</th><th>Particulars</th>${specific?'':'<th>Account</th>'}<th>Type</th><th>Mode / Ref</th><th class="num-cell">Received</th><th class="num-cell">Paid</th><th class="num-cell">Balance</th></tr></thead><tbody>
+     <tr><td>${esc(bankFrom)}</td><td colspan="${specific?5:6}"><i>Opening balance</i></td><td class="num-cell">${money2(L.opening)}</td></tr>
+     ${L.rows.filter(view).map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.desc)}${r.assumed?' <span class="pill neutral" title="No payment date recorded — using the document date">assumed date</span>':''}</td>${specific?'':`<td>${esc(bankAcctName(r.acct))}</td>`}<td>${esc(r.src)}</td><td style="color:var(--muted);">${esc((r.mode+' '+r.ref).trim())}</td>
        <td class="num-cell">${r.dir==='in'?money2(r.amount):''}</td><td class="num-cell">${r.dir==='out'?money2(r.amount):''}</td><td class="num-cell">${money2(r.balance)}</td>
-       </tr>`).join('')||'<tr><td colspan="7"><div class="empty">No bank movements in this range.</div></td></tr>'}
+       </tr>`).join('')||'<tr><td colspan="8"><div class="empty">No bank movements in this range.</div></td></tr>'}
     </tbody></table></div>
    </div>
    <div class="card" style="margin-top:14px;"><h2 style="margin:0;">Verify against bank statement</h2>
-    <p class="hint">Enter the closing balance from the bank statement for ${esc(bankFrom)} → ${esc(bankTo)}. Books say <b>${money2(L.closing)}</b>.</p>
+    ${specific?`<p class="hint">Enter the closing balance from the <b>${esc(bankAcctName(bankAcct))}</b> statement for ${esc(bankFrom)} → ${esc(bankTo)}. Books say <b>${money2(L.closing)}</b>.</p>`:`<p class="hint">Pick one account above to verify it against its own statement. Combined books balance: <b>${money2(L.closing)}</b>.</p>`}
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
       <div class="field"><label>Statement closing balance ₹</label><input type="number" step="0.01" id="bkStmt" value="${L.closing}"></div>
       <div class="field"><label>Note</label><input id="bkNote" placeholder="optional"></div>
       <div>Difference: <b id="bkDiff">${money2(0)}</b></div>
-      ${ed?`<button class="btn" id="bkVerify">🔒 Verify &amp; lock period</button>`:''}
+      ${ed&&specific?`<button class="btn" id="bkVerify">🔒 Verify &amp; lock period</button>`:''}
     </div>
     <h3 style="margin:14px 0 6px;">Verified periods</h3>
-    ${hist.length?`<table><thead><tr><th>Period</th><th class="num-cell">Opening</th><th class="num-cell">Books</th><th class="num-cell">Statement</th><th class="num-cell">Diff</th><th>By</th><th></th></tr></thead><tbody>
-     ${hist.map(h=>`<tr style="${h.unlocked?'opacity:.5':''}"><td>${esc(h.from)} → ${esc(h.to)}${h.unlocked?' (unlocked)':''}</td><td class="num-cell">${money2(h.opening)}</td><td class="num-cell">${money2(h.booksClosing)}</td><td class="num-cell">${money2(h.statementBalance)}</td><td class="num-cell">${money2(h.difference)}</td><td>${esc(h.verifiedBy||'')} · ${esc((h.verifiedAt||'').slice(0,10))}${h.note?'<br><span class="hint">'+esc(h.note)+'</span>':''}</td>
-       <td>${ed&&SESSION&&SESSION.role==='Admin'&&!h.unlocked&&lv&&lv.id===h.id?`<button class="btn danger sm" data-unlock="${esc(h.id)}">Unlock</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No period verified yet.</div>'}
+    ${hist.length?`<table><thead><tr><th>Account</th><th>Period</th><th class="num-cell">Opening</th><th class="num-cell">Books</th><th class="num-cell">Statement</th><th class="num-cell">Diff</th><th>By</th><th></th></tr></thead><tbody>
+     ${hist.map(h=>`<tr style="${h.unlocked?'opacity:.5':''}"><td>${esc(bankAcctName(bankResolve(h.accountId)))}</td><td>${esc(h.from)} → ${esc(h.to)}${h.unlocked?' (unlocked)':''}</td><td class="num-cell">${money2(h.opening)}</td><td class="num-cell">${money2(h.booksClosing)}</td><td class="num-cell">${money2(h.statementBalance)}</td><td class="num-cell">${money2(h.difference)}</td><td>${esc(h.verifiedBy||'')} · ${esc((h.verifiedAt||'').slice(0,10))}${h.note?'<br><span class="hint">'+esc(h.note)+'</span>':''}</td>
+       <td>${ed&&SESSION&&SESSION.role==='Admin'&&!h.unlocked&&bankLastVerified(h.accountId)&&bankLastVerified(h.accountId).id===h.id?`<button class="btn danger sm" data-unlock="${esc(h.id)}">Unlock</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No period verified yet.</div>'}
    </div>`;
   const q=id=>c.querySelector('#'+id);
   const re=()=>renderBank(c,actions);
+  q('bkAcct').onchange=e=>{ bankAcct=e.target.value; bankFrom=''; bankTo=''; re(); };
   q('bkFrom').onchange=e=>{ bankFrom=e.target.value; re(); };
   q('bkTo').onchange=e=>{ bankTo=e.target.value; re(); };
   q('bkView').onchange=e=>{ bankView=e.target.value; re(); };
-  q('bkNext').onclick=()=>{ [bankFrom,bankTo]=bankDefaultRange(); re(); };
+  q('bkNext').onclick=()=>{ [bankFrom,bankTo]=bankDefaultRange(bankAcct); re(); };
   q('bkPdf').onclick=()=>bankLedgerPdf(L);
   const upd=()=>{ q('bkDiff').textContent = money2(round2((Number(q('bkStmt').value)||0)-L.closing)); }; q('bkStmt').oninput=upd; upd();
   if(ed){
-    actions.querySelector('#bkInv').onclick=openInvoicePaymentModal; actions.querySelector('#bkBill').onclick=openBillPaymentPicker; actions.querySelector('#bkOth').onclick=openOtherIncomeModal;
-    q('bkOpenSave').onclick=async()=>{ ORG.bankOpening={amount:Number(q('bkOpenAmt').value)||0}; ORG.bankStartDate=q('bkStartDate').value||BANK_DEFAULT_START; await saveOrg(); toast('Opening balance saved.'); bankFrom=''; render(); };
-    q('bkVerify').onclick=async()=>{
+    actions.querySelector('#bkInv').onclick=openInvoicePaymentModal; actions.querySelector('#bkBill').onclick=openBillPaymentPicker; actions.querySelector('#bkOth').onclick=openOtherIncomeModal; actions.querySelector('#bkTr').onclick=openTransferModal; q('bkAccts').onclick=openBankAccountsModal;
+    q('bkOpenSave').onclick=async()=>{ ORG.bankStartDate=q('bkStartDate').value||BANK_DEFAULT_START; await saveOrg(); toast('Bank start date saved.'); bankFrom=''; render(); };
+    if(q('bkVerify')) q('bkVerify').onclick=async()=>{
       if(bankFrom>bankTo){ toast('From date is after To date.', true); return; }
       const need = lt ? dayAdd(lt,1) : bankStart();
       if(bankFrom!==need){ toast(`Periods must run one after another — the next period starts on ${need}. Use “Next unverified period”.`, true); return; }
       const stmt=Number(q('bkStmt').value); if(isNaN(stmt)){ toast('Enter the statement balance.', true); return; }
-      const rec={id:uid(), from:bankFrom, to:bankTo, opening:L.opening, booksClosing:L.closing, statementBalance:stmt, difference:round2(stmt-L.closing), note:q('bkNote').value||'', verifiedBy:(SESSION&&SESSION.name)||'', verifiedAt:new Date().toISOString(), totIn:L.totIn, totOut:L.totOut, entries:L.rows.length};
+      const rec={id:uid(), accountId:bankAcct, from:bankFrom, to:bankTo, opening:L.opening, booksClosing:L.closing, statementBalance:stmt, difference:round2(stmt-L.closing), note:q('bkNote').value||'', verifiedBy:(SESSION&&SESSION.name)||'', verifiedAt:new Date().toISOString(), totIn:L.totIn, totOut:L.totOut, entries:L.rows.length};
       tagRecord(rec,true); BANK_RECONS.push(rec); await saveBankRecons(); toast('Period verified and locked.'); bankFrom=''; render(); };
     c.querySelectorAll('[data-unlock]').forEach(b=>b.onclick=async()=>{ const r=BANK_RECONS.find(x=>x.id===b.dataset.unlock); if(!r) return; r.unlocked=true; tagRecord(r,false); await saveBankRecons(); bankFrom=''; render(); });
   }
@@ -5526,11 +5559,52 @@ function renderBank(c, actions){
 function bankLedgerPdf(L){
   const rows = L.rows.map(r=>`<tr><td class="val">${esc(r.date)}</td><td class="val">${esc(r.desc)}${r.assumed?' *':''}</td><td class="val">${esc(r.src)}</td><td class="val amtcell">${r.dir==='in'?money2(r.amount):''}</td><td class="val amtcell">${r.dir==='out'?money2(r.amount):''}</td><td class="val amtcell">${money2(r.balance)}</td></tr>`).join('');
   printModalDoc('Bank ledger', `<div class="payslip-title">BANK LEDGER — ${esc(bankFrom)} TO ${esc(bankTo)}</div>
-   <p style="font-size:11px;">${esc(ORG.bankName||'')} ${esc(ORG.bankAccNo||'')}</p>
+   <p style="font-size:11px;">${L.acct==='all'?'All accounts':esc(bankAcctName(L.acct))}</p>
    <table class="pstable items-table"><tr class="earnhead"><td>DATE</td><td>PARTICULARS</td><td>TYPE</td><td class="amtcell">RECEIVED</td><td class="amtcell">PAID</td><td class="amtcell">BALANCE</td></tr>
    <tr><td class="val"></td><td class="val" colspan="4"><i>Opening balance</i></td><td class="val amtcell">${money2(L.opening)}</td></tr>${rows}
    <tr class="totrow"><td colspan="3">TOTAL / CLOSING</td><td class="amtcell">${money2(L.totIn)}</td><td class="amtcell">${money2(L.totOut)}</td><td class="amtcell">${money2(L.closing)}</td></tr></table>
    <div class="regime-note">* date assumed (no payment date recorded). Received = invoice payments net of client TDS and credit notes, plus other income. Paid = bill, statutory and salary payments.</div>`);
+}
+
+function openTransferModal(){
+  const accts = bankAccounts();
+  if(accts.length<2){ toast('Add a second bank account first (Manage accounts).', true); return; }
+  openModal(`<div class="modal-head"><h3>Transfer between own accounts</h3><button class="modal-close" id="mClose">✕</button></div>
+   <form id="trForm"><div class="grid cols-2" style="gap:10px;">
+    <div class="field"><label>From</label><select name="from">${bankAcctOptions(accts[0].id)}</select></div>
+    <div class="field"><label>To</label><select name="to">${bankAcctOptions(accts[1].id)}</select></div>
+    <div class="field"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
+    <div class="field"><label>Amount ₹</label><input type="number" step="0.01" min="0.01" name="amount" required></div>
+    <div class="field" style="grid-column:1/-1"><label>Reference / note</label><input name="ref"></div></div>
+    <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
+  document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('trForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target);
+    const f=fd.get('from'), t=fd.get('to'); if(f===t){ toast('Choose two different accounts.', true); return; }
+    if(!bankGuardDate(fd.get('date'), f) || !bankGuardDate(fd.get('date'), t)) return;
+    const rec={ id:uid(), billType:'INTERBANK', billDate:fd.get('date'), fromBankName:bankAcctName(f), toBankName:bankAcctName(t), transferAmount:Number(fd.get('amount'))||0,
+      description:`Transfer ${bankAcctName(f)} → ${bankAcctName(t)}`, category:'Transfer', paidAmount:0, paymentRef:fd.get('ref')||'', notes:'Created from Bank tab.' };
+    tagRecord(rec,true); rec.voucherNo=nextExpNo(); EXPENSES.push(rec);
+    if(await saveExpenses()===false) return; closeModal(); toast('Transfer recorded.'); render(); };
+}
+function openBankAccountsModal(){
+  const rows = bankAccounts().map(a=>Object.assign({},a));
+  const draw=()=>{
+    document.getElementById('modalBox').innerHTML = `<div class="modal-head"><h3>Bank accounts</h3><button class="modal-close" id="mClose">✕</button></div>
+     <p class="hint">Opening balance is the balance on the bank start date (${esc(bankStart())}). Verified periods carry their own closing forward.</p>
+     <table><thead><tr><th>Name</th><th>Account no.</th><th class="num-cell">Opening ₹</th></tr></thead><tbody>
+     ${rows.map((a,i)=>`<tr><td><input data-f="name" data-i="${i}" value="${esc(a.name||'')}" style="width:100%"></td><td><input data-f="accNo" data-i="${i}" value="${esc(a.accNo||'')}" style="width:100%"></td><td><input data-f="opening" data-i="${i}" type="number" step="0.01" value="${a.opening||0}" style="width:130px"></td></tr>`).join('')}
+     </tbody></table>
+     <div class="btn-row"><button class="btn secondary" id="baAdd">+ Add account</button><button class="btn" id="baSave">Save</button><button class="btn secondary" id="mCancel">Cancel</button></div>`;
+    const sync=()=>document.querySelectorAll('#modalBox [data-f]').forEach(el=>{ const r=rows[+el.dataset.i]; r[el.dataset.f]= el.dataset.f==='opening'?(Number(el.value)||0):el.value; });
+    document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+    document.getElementById('baAdd').onclick=()=>{ sync(); rows.push({id:'ba-'+uid(), name:'', accNo:'', opening:0}); draw(); };
+    document.getElementById('baSave').onclick=async()=>{ sync();
+      if(rows.some(r=>!(r.name||'').trim())){ toast('Every account needs a name.', true); return; }
+      const names=rows.map(r=>r.name.trim().toLowerCase()); if(new Set(names).size!==names.length){ toast('Account names must be different.', true); return; }
+      ORG.bankAccounts = rows.map(r=>({id:r.id, name:r.name.trim(), accNo:(r.accNo||'').trim(), opening:Number(r.opening)||0}));
+      await saveOrg(); closeModal(); toast('Bank accounts saved.'); bankAcct=''; bankFrom=''; render(); };
+  };
+  openModal(''); draw();
 }
 
 function renderTaxCompliance(c, actions){
