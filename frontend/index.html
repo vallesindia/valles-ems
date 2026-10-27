@@ -255,6 +255,7 @@
       <button class="nav-item" data-tab="staff"><span class="ic">👥</span>Staff<span class="badge" id="compBadge" style="display:none;">0</span></button>
       <button class="nav-item" data-tab="expenses"><span class="ic">🧾</span>Bills &amp; Expenses</button>
       <button class="nav-item" data-tab="taxcompliance"><span class="ic">📊</span>Tax Compliance</button>
+      <button class="nav-item" data-tab="bank"><span class="ic">🏦</span>Bank</button>
       <button class="nav-item" data-tab="parties"><span class="ic">🤝</span>Parties</button>
       <button class="nav-item" data-tab="documents"><span class="ic">📄</span>Documents<span class="badge" id="docBadge" style="display:none;">0</span></button>
       <button class="nav-item" data-tab="settings"><span class="ic">🔒</span>Settings</button>
@@ -332,6 +333,9 @@ async function getJSON(key, def){
   if(key==='reimbursements') return LOCAL.reimbursements!=null ? LOCAL.reimbursements : def;
   if(key==='users') return LOCAL.users!=null ? LOCAL.users : def;
   if(key==='access') return LOCAL.access!=null ? LOCAL.access : def;
+  if(key==='otherIncome') return LOCAL.otherIncome!=null ? LOCAL.otherIncome : def;
+  if(key==='bankRecons') return LOCAL.bankRecons!=null ? LOCAL.bankRecons : def;
+  if(key==='gstPayments') return LOCAL.gstPayments!=null ? LOCAL.gstPayments : def;
   if(key.indexOf('compliance:')===0){ const v = LOCAL.compliance[key.slice(11)]; return v!=null ? v : def; }
   return def;
 }
@@ -348,6 +352,9 @@ async function setJSON(key, value){
   else if(key==='reimbursements') LOCAL.reimbursements = value;
   else if(key==='users') LOCAL.users = value;
   else if(key==='access') LOCAL.access = value;
+  else if(key==='otherIncome') LOCAL.otherIncome = value;
+  else if(key==='bankRecons') LOCAL.bankRecons = value;
+  else if(key==='gstPayments') LOCAL.gstPayments = value;
   else if(key.indexOf('compliance:')===0){ LOCAL.compliance[key.slice(11)] = value; }
   try{ localStorage.setItem(LS_KEY, JSON.stringify(LOCAL)); }
   catch(e){ toast('Local save failed — browser storage may be full. Try removing large documents.', true); return false; }
@@ -359,12 +366,12 @@ function buildPayload(){
   ensureLocal();
   return { app:'Valles Management System', version:2, savedAt:new Date().toISOString(),
     org:ORG, employees:EMPLOYEES, payslips:PAYSLIPS, compliance:COMPLIANCE,
-    parties:PARTIES, documents:COMPANY_DOCS, transactions:TRANSACTIONS, expenses:EXPENSES, reimbursements:REIMBURSEMENTS, users:USERS, access:ACCESS,
+    parties:PARTIES, documents:COMPANY_DOCS, transactions:TRANSACTIONS, expenses:EXPENSES, reimbursements:REIMBURSEMENTS, users:USERS, access:ACCESS, otherIncome:OTHER_INCOME, bankRecons:BANK_RECONS, gstPayments:GST_PAYMENTS,
     presence:LOCAL.presence, tombstones:LOCAL.tombstones };
 }
 
 /* ============================= STATE ============================= */
-let ORG = null, EMPLOYEES = [], PAYSLIPS = [], COMPLIANCE = {}, PARTIES = [], COMPANY_DOCS = [], TRANSACTIONS = [], EXPENSES = [], REIMBURSEMENTS = [], USERS = [], ACCESS = [];
+let ORG = null, EMPLOYEES = [], PAYSLIPS = [], COMPLIANCE = {}, PARTIES = [], COMPANY_DOCS = [], TRANSACTIONS = [], EXPENSES = [], REIMBURSEMENTS = [], USERS = [], ACCESS = [], OTHER_INCOME = [], BANK_RECONS = [], GST_PAYMENTS = [];
 let settingsUnlocked = false;
 let activeTab = 'dashboard';
 
@@ -586,6 +593,9 @@ async function loadAll(){
   REIMBURSEMENTS = await getJSON('reimbursements', []);
   USERS = await getJSON('users', []);
   ACCESS = await getJSON('access', []);
+  OTHER_INCOME = await getJSON('otherIncome', []);
+  BANK_RECONS = await getJSON('bankRecons', []);
+  GST_PAYMENTS = await getJSON('gstPayments', []);
   refreshBrand();
 }
 async function saveOrg(){ ORG._orgUpdatedAt = new Date().toISOString(); return await setJSON('org-profile', ORG); }
@@ -615,6 +625,21 @@ async function saveAccess(){
   const remote = await pullRemotePayload();
   ACCESS = mergeCollection('access', ACCESS, remote && remote.access, remote && remote.tombstones && remote.tombstones.access);
   return await setJSON('access', ACCESS);
+}
+async function saveOtherIncome(){
+  const remote = await pullRemotePayload();
+  OTHER_INCOME = mergeCollection('otherIncome', OTHER_INCOME, remote && remote.otherIncome, remote && remote.tombstones && remote.tombstones.otherIncome);
+  return await setJSON('otherIncome', OTHER_INCOME);
+}
+async function saveBankRecons(){
+  const remote = await pullRemotePayload();
+  BANK_RECONS = mergeCollection('bankRecons', BANK_RECONS, remote && remote.bankRecons, remote && remote.tombstones && remote.tombstones.bankRecons);
+  return await setJSON('bankRecons', BANK_RECONS);
+}
+async function saveGstPayments(){
+  const remote = await pullRemotePayload();
+  GST_PAYMENTS = mergeCollection('gstPayments', GST_PAYMENTS, remote && remote.gstPayments, remote && remote.tombstones && remote.tombstones.gstPayments);
+  return await setJSON('gstPayments', GST_PAYMENTS);
 }
 async function saveTransactions(){
   const remote = await pullRemotePayload();
@@ -679,14 +704,15 @@ const ACCESS_MODULES = [
   { key:'staff',         label:'Staff', subs:[ { key:'staff.details', label:'Staff Details' }, { key:'staff.payroll', label:'Payslip & Compliance' } ] },
   { key:'expenses',      label:'Bills & Expenses' },
   { key:'taxcompliance', label:'Tax Compliance' },
+  { key:'bank',          label:'Bank Reconciliation' },
   { key:'parties',       label:'Parties' },
   { key:'documents',     label:'Documents' }
 ];
 const DEFAULT_ROLE_PERMS = {
-  'Accounts':  { edit:true,  modules:['dashboard','transactions','expenses','taxcompliance','parties','documents'] },
+  'Accounts':  { edit:true,  modules:['dashboard','transactions','expenses','taxcompliance','bank','parties','documents'] },
   'HR':        { edit:true,  modules:['dashboard','staff','staff.details','staff.payroll','documents'] },
-  'View Only': { edit:false, modules:['dashboard','transactions','expenses','taxcompliance','parties','documents'] },
-  'CA':        { edit:false, modules:['dashboard','transactions','expenses','taxcompliance'] }
+  'View Only': { edit:false, modules:['dashboard','transactions','expenses','taxcompliance','bank','parties','documents'] },
+  'CA':        { edit:false, modules:['dashboard','transactions','expenses','taxcompliance','bank'] }
 };
 const DEFAULT_PIN_DAYS = 90;
 const MAX_PIN_FAILS = 5;
@@ -701,7 +727,9 @@ function rolePerms(){
   const rec = ACCESS.find(a=>a.id==='rolePerms');
   const stored = (rec && rec.perms) || {};
   const out = {};
-  Object.keys(DEFAULT_ROLE_PERMS).forEach(r=>{ out[r] = stored[r] ? stored[r] : DEFAULT_ROLE_PERMS[r]; });
+  Object.keys(DEFAULT_ROLE_PERMS).forEach(r=>{ out[r] = stored[r] ? stored[r] : DEFAULT_ROLE_PERMS[r];
+    /* the Bank module arrived after some permission sets were saved: grant it to roles that already see Bills & Expenses, until the set is re-saved */
+    if(stored[r] && !stored[r].bankSet && r!=='HR' && stored[r].modules.includes('expenses') && !stored[r].modules.includes('bank')) out[r] = Object.assign({}, stored[r], {modules:stored[r].modules.concat('bank')}); });
   return out;
 }
 function can(key){
@@ -718,9 +746,10 @@ function canEdit(){
   const p = rolePerms()[SESSION.role];
   return !!(p && p.edit);
 }
-function isReadOnly(){ return !!SESSION && !canEdit(); }
+let _auditBypass0 = false;
+function isReadOnly(){ return !!SESSION && !canEdit() && !(typeof _auditBypass!=='undefined' && _auditBypass); }
 function firstAllowedTab(){
-  return ['dashboard','transactions','staff','expenses','taxcompliance','parties','documents','settings'].find(t=>can(t)) || null;
+  return ['dashboard','transactions','staff','expenses','taxcompliance','bank','parties','documents','settings'].find(t=>can(t)) || null;
 }
 async function hashPin(userId, pin){ return sha256('VALLES_PIN_'+userId+'_'+pin); }
 function activeAdmins(){ return USERS.filter(u=>u.role==='Admin' && u.active!==false); }
@@ -1080,6 +1109,7 @@ function renderUserMgmt(){
     const out = {};
     editRoles.forEach(r=>{
       out[r] = {
+        bankSet: true,
         edit: !!host.querySelector(`input[data-role="${r}"][data-edit]`).checked,
         modules: [...host.querySelectorAll(`input[data-role="${r}"][data-mod]`)].filter(c=>c.checked).map(c=>c.dataset.mod)
       };
@@ -1224,6 +1254,7 @@ function setTab(tab){
     transactions:['Transactions','Enquiries, quotations, purchase orders, invoices, credit & delivery notes'],
     expenses:['Bills & Expenses','Vendor bills, GST and TDS tracking'],
     taxcompliance:['Tax Compliance','TDS liability, GST input/output reconciliation and filing alerts'],
+    bank:['Bank Reconciliation','Money received and paid, verified against the bank statement'],
     documents:['Documents','Registrations, licences, certificates and insurance'],
     settings:['Settings','Company details, backup and restore — admin only']
   };
@@ -1263,6 +1294,7 @@ function render(){
   if(activeTab==='transactions') return renderTransactions(c, actions);
   if(activeTab==='expenses') return renderExpenses(c, actions);
   if(activeTab==='taxcompliance') return renderTaxCompliance(c, actions);
+  if(activeTab==='bank') return renderBank(c, actions);
   if(activeTab==='documents') return renderDocuments(c, actions);
   if(activeTab==='settings') return renderSettings(c, actions);
 }
@@ -2744,6 +2776,9 @@ function pullLatestFromDriveIntoLocal(remote){
   REIMBURSEMENTS = mergeCollection('reimbursements', REIMBURSEMENTS, remote.reimbursements, remote.tombstones && remote.tombstones.reimbursements);
   USERS = mergeCollection('users', USERS, remote.users, remote.tombstones && remote.tombstones.users);
   ACCESS = mergeCollection('access', ACCESS, remote.access, remote.tombstones && remote.tombstones.access);
+  OTHER_INCOME = mergeCollection('otherIncome', OTHER_INCOME, remote.otherIncome, remote.tombstones && remote.tombstones.otherIncome);
+  BANK_RECONS = mergeCollection('bankRecons', BANK_RECONS, remote.bankRecons, remote.tombstones && remote.tombstones.bankRecons);
+  GST_PAYMENTS = mergeCollection('gstPayments', GST_PAYMENTS, remote.gstPayments, remote.tombstones && remote.tombstones.gstPayments);
   if(remote.compliance){
     Object.keys(remote.compliance).forEach(empId=>{
       const tombKind = 'compliance:'+empId;
@@ -2753,7 +2788,7 @@ function pullLatestFromDriveIntoLocal(remote){
   }
   ensureLocal();
   LOCAL.employees = EMPLOYEES; LOCAL.payslips = PAYSLIPS; LOCAL.parties = PARTIES;
-  LOCAL.documents = COMPANY_DOCS; LOCAL.transactions = TRANSACTIONS; LOCAL.expenses = EXPENSES; LOCAL.reimbursements = REIMBURSEMENTS; LOCAL.users = USERS; LOCAL.access = ACCESS; LOCAL.compliance = COMPLIANCE;
+  LOCAL.documents = COMPANY_DOCS; LOCAL.transactions = TRANSACTIONS; LOCAL.expenses = EXPENSES; LOCAL.reimbursements = REIMBURSEMENTS; LOCAL.users = USERS; LOCAL.access = ACCESS; LOCAL.otherIncome = OTHER_INCOME; LOCAL.bankRecons = BANK_RECONS; LOCAL.gstPayments = GST_PAYMENTS; LOCAL.compliance = COMPLIANCE;
   try{ localStorage.setItem(LS_KEY, JSON.stringify(LOCAL)); }catch(e){}
   onUsersChanged();
   if(activeTab && document.getElementById('content')) render(); // reflect anything that changed
@@ -2772,7 +2807,10 @@ async function applyRestoredPayload(data){
   PARTIES = data.parties||[]; COMPANY_DOCS = data.documents||[]; TRANSACTIONS = data.transactions||[]; EXPENSES = data.expenses||[]; REIMBURSEMENTS = data.reimbursements||[];
   if(Array.isArray(data.users)) USERS = data.users;   /* an older backup without users must never wipe the user list */
   if(Array.isArray(data.access)) ACCESS = data.access;
-  await saveOrg(); await saveEmployees(); await savePayslips(); await saveParties(); await saveCompanyDocs(); await saveTransactions(); await saveExpenses(); await saveReimbursements(); await saveUsers(); await saveAccess();
+  if(Array.isArray(data.otherIncome)) OTHER_INCOME = data.otherIncome;
+  if(Array.isArray(data.bankRecons)) BANK_RECONS = data.bankRecons;
+  if(Array.isArray(data.gstPayments)) GST_PAYMENTS = data.gstPayments;
+  await saveOrg(); await saveEmployees(); await savePayslips(); await saveParties(); await saveCompanyDocs(); await saveTransactions(); await saveExpenses(); await saveReimbursements(); await saveUsers(); await saveAccess(); await saveOtherIncome(); await saveBankRecons(); await saveGstPayments();
   for(const empId of Object.keys(COMPLIANCE)){ await saveCompliance(empId); }
   refreshBrand(); updateDocBadge();
   onUsersChanged();
@@ -3981,6 +4019,7 @@ function openTxnForm(txnId, prefill){
       ${currency!=='INR' ? `<div class="hint" style="margin-top:6px;">Grand Total in INR (at ${exchRate}): <b>${money2(tot.grandTotalINR)}</b></div>` : ''}`;
   }
   document.getElementById('txnGstMode').addEventListener('change', ()=>{ drawLineItems(); drawTotalsPreview(); });
+  autoPickGstMode('txnPartySel','txnGstMode');
   document.getElementById('txnExchRate').addEventListener('input', drawTotalsPreview);
   ['txnOtherCharges','txnOtherChargesGst','txnRoundOff'].forEach(id=> document.getElementById(id).addEventListener('input', drawTotalsPreview));
   document.getElementById('txnAutoRound').onclick = ()=>{
@@ -4796,16 +4835,100 @@ function pfLiabilityData(year, month){
     const edliBase = Math.min(p.basic||0, pfWageCapFor(period));
     const edli = Math.round(edliBase*0.005);
     const total = round2((p.pfEmployee||0)+(p.pfEmployer||0)+admin+edli);
-    return { empId:p.empId, name:p.empName||(emp?emp.name:'—'), type:(emp?emp.department:'')||'—', pfWages:p.basic||0,
-      isCapped, pfEmployee:p.pfEmployee||0, pfEmployer:p.pfEmployer||0, admin, edli, edliCapped: edliBase<(p.basic||0)-0.5, total,
-      uan:emp?emp.uan:'', pfNumber:emp?emp.pfNumber:'' };
+    return { empId:p.empId, name:p.empName||(emp?emp.name:'—'), type:(emp?emp.department:'')||'—', pfWages:Math.round(p.basic||0),
+      isCapped, pfEmployee:Math.round(p.pfEmployee||0), pfEmployer:Math.round(p.pfEmployer||0), admin, edli, edliCapped: edliBase<(p.basic||0)-0.5, total:Math.round(total),
+      doj:emp?emp.doj:'', uan:emp?emp.uan:'', pfNumber:emp?emp.pfNumber:'' };
   });
   const totals = rows.reduce((s,r)=>({ pfWages:s.pfWages+r.pfWages, pfEmployee:s.pfEmployee+r.pfEmployee, pfEmployer:s.pfEmployer+r.pfEmployer, admin:s.admin+r.admin, edli:s.edli+r.edli, total:s.total+r.total }),
     {pfWages:0, pfEmployee:0, pfEmployer:0, admin:0, edli:0, total:0});
+  // EPFO challan: each of Admin charges (A/c 2) and EDLI (A/c 21) has a ₹500 minimum per establishment.
+  totals.adminShortfall = rows.length && totals.admin<500 ? 500-totals.admin : 0;
+  totals.edliShortfall = rows.length && totals.edli<500 ? 500-totals.edli : 0;
+  totals.admin += totals.adminShortfall; totals.edli += totals.edliShortfall;
+  totals.total += totals.adminShortfall + totals.edliShortfall;
   const deadlineYear = month===12 ? year+1 : year;
   const deadlineMonth = month===12 ? 1 : month+1;
   const deadline = new Date(deadlineYear, deadlineMonth-1, 15); // PF deposit deadline: 15th of next month
   return { period, rows, totals, deadline };
+}
+
+/* ===== GST engine (monthly + FY) =====
+   Output  = invoices dated in the month (+ RCM liability self-assessed on bills dated in the month).
+   Input   = non-RCM bill GST, counted in the bill's GSTR-2B claim month (falls back to bill month),
+             + RCM ITC of the PREVIOUS month (RCM credit is only claimable after it has been paid).
+   Credits = manual credits (e.g. GST TDS deducted by clients) subtracted from the amount to deposit. */
+function localYmd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function ymAdd(ym, n){ const [y,m]=ym.split('-').map(Number); const d=new Date(y,m-1+n,1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function gstEmptyHeads(){ return {igst:0,cgst:0,sgst:0}; }
+function gstHeadsTotal(h){ return round2((h.igst||0)+(h.cgst||0)+(h.sgst||0)); }
+function gstMonthCredits(period){ const l=(ORG.gstCredits&&ORG.gstCredits[period])||[]; return { list:l, total:round2(l.reduce((s,x)=>s+(Number(x.amount)||0),0)) }; }
+function gstMonthData(year, month){
+  const period = year+'-'+String(month).padStart(2,'0');
+  const next = ymAdd(period,1);
+  const out = gstEmptyHeads(), rcm = gstEmptyHeads(), itc = gstEmptyHeads(), prevRcm = gstEmptyHeads();
+  const invs = TRANSACTIONS.filter(t=> t.txnCategory==='INVOICE' && (t.txnDate||'').slice(0,7)===period);
+  invs.forEach(t=>{ const x=calcTxnTotals(t), r=Number(t.exchRate)||1; out.igst+=x.igst*r; out.cgst+=x.cgst*r; out.sgst+=x.sgst*r; });
+  const prev = ymAdd(period,-1);
+  EXPENSES.forEach(e=>{
+    if((e.billType||'SUPPLIER')!=='SUPPLIER') return;
+    const t = calcExpenseTotals(e); if(!t.gstTotal) return;
+    const bm = (e.billDate||'').slice(0,7);
+    if(e.rcmApplicable){
+      if(bm===period){ rcm.igst+=t.igst; rcm.cgst+=t.cgst; rcm.sgst+=t.sgst; }
+      if(bm===prev){ prevRcm.igst+=t.igst; prevRcm.cgst+=t.cgst; prevRcm.sgst+=t.sgst; }
+    } else {
+      const cm = e.gstr2bClaimMonth || bm;
+      if(cm===period){ itc.igst+=t.igst; itc.cgst+=t.cgst; itc.sgst+=t.sgst; }
+    }
+  });
+  ['igst','cgst','sgst'].forEach(k=>{ out[k]=round2(out[k]); rcm[k]=round2(rcm[k]); itc[k]=round2(itc[k]); prevRcm[k]=round2(prevRcm[k]); });
+  const outputTotal = round2(gstHeadsTotal(out)+gstHeadsTotal(rcm));
+  const inputTotal = round2(gstHeadsTotal(itc)+gstHeadsTotal(prevRcm));
+  const cr = gstMonthCredits(period);
+  const net = round2(outputTotal - inputTotal);          // before credits / carry-forward
+  const afterCredits = round2(net - cr.total);
+  return { period, next, out, rcm, itc, prevRcm, outputTotal, inputTotal, net, credits:cr.list, creditsTotal:cr.total, afterCredits, invoiceCount:invs.length };
+}
+function gstOpeningStart(){ const o=ORG.openingITC; return (o && o.asOf) ? o.asOf.slice(0,7) : '2026-04'; }
+/* ITC available to carry into `period` = opening balance + surplus of every earlier month, less what later months consumed. */
+function gstCarryInto(period){
+  let cf = Number(ORG.openingITC&&ORG.openingITC.amount)||0;
+  let cur = gstOpeningStart();
+  while(cur < period){
+    const [y,m]=cur.split('-').map(Number);
+    const d = gstMonthData(y,m);
+    if(d.afterCredits<0) cf = round2(cf - d.afterCredits);
+    else { const use=Math.min(cf,d.afterCredits); cf = round2(cf-use); }
+    cur = ymAdd(cur,1);
+  }
+  return Math.max(0,cf);
+}
+function gstPayablePanel(year, month){
+  const d = gstMonthData(year,month);
+  const cfIn = gstCarryInto(d.period);
+  const payBefore = Math.max(0, d.afterCredits);
+  const useCf = Math.min(cfIn, payBefore);
+  const payAfter = round2(payBefore - useCf);
+  const cfOut = round2(cfIn - useCf + Math.max(0,-d.afterCredits));
+  const paid = round2(GST_PAYMENTS.filter(p=>p.period===d.period).reduce((s,p)=>s+(Number(p.amount)||0),0));
+  return Object.assign({}, d, { cfIn, payBefore, useCf, payAfter, cfOut, paid, balanceDue: round2(payAfter-paid) });
+}
+function gstFySummary(fyStart){
+  const rows=[]; let cf = Number(ORG.openingITC&&ORG.openingITC.amount)||0;
+  const start = gstOpeningStart();
+  // carry from opening start up to the FY start if the opening predates it
+  let cur = start < fyStart+'-04' ? start : fyStart+'-04';
+  while(cur < fyStart+'-04'){ const [y,m]=cur.split('-').map(Number); const d=gstMonthData(y,m); if(d.afterCredits<0) cf=round2(cf-d.afterCredits); else { const u=Math.min(cf,d.afterCredits); cf=round2(cf-u);} cur=ymAdd(cur,1); }
+  for(let i=0;i<12;i++){
+    const ym = ymAdd(fyStart+'-04', i); const [y,m]=ym.split('-').map(Number);
+    const d = gstMonthData(y,m);
+    const opening = (ym<start) ? 0 : cf;
+    let used=0, closing=cf;
+    if(ym>=start){ if(d.afterCredits<0) closing = round2(cf-d.afterCredits); else { used=Math.min(cf,d.afterCredits); closing=round2(cf-used); } cf=closing; }
+    rows.push({ ym, d, opening, used, closing, cash: ym<start?0:round2(Math.max(0,d.afterCredits)-used) });
+  }
+  const sum = k=> round2(rows.reduce((s,r)=>s+k(r),0));
+  return { fyStart, rows, totals:{ out:sum(r=>gstHeadsTotal(r.d.out)), rcm:sum(r=>gstHeadsTotal(r.d.rcm)), itc:sum(r=>gstHeadsTotal(r.d.itc)), prevRcm:sum(r=>gstHeadsTotal(r.d.prevRcm)), credits:sum(r=>r.d.creditsTotal), cash:sum(r=>r.cash) } };
 }
 function taxComplianceData(year, month){
   const period = year+'-'+String(month).padStart(2,'0');
@@ -4882,12 +5005,11 @@ function taxComplianceData(year, month){
   // GST Input Credit — from Bills & Expenses this month (includes RCM-self-assessed GST,
   // since that's also claimable as input credit once self-paid).
   const expensesThisMonth = EXPENSES.filter(e=> e.billDate>=monthStart && e.billDate<nextMonthDate);
-  const gstInputExpenses = round2(expensesThisMonth.reduce((s,e)=> s+calcExpenseTotals(e).gstTotal, 0));
-
-  // GST Output — from Invoice transactions this month.
+  const gm = gstMonthData(year, month);
+  const gstInputExpenses = gm.inputTotal;
   const invoiceTxns = TRANSACTIONS.filter(t=> t.txnCategory==='INVOICE' && t.txnDate>=monthStart && t.txnDate<nextMonthDate);
-  const gstOutput = round2(invoiceTxns.reduce((s,t)=> s+calcTxnTotals(t).taxAmountINR, 0));
-  const gstPayable = round2(gstOutput - gstInputExpenses);
+  const gstOutput = gm.outputTotal;
+  const gstPayable = gm.net;
   // The same GST output in each invoice's own currency (e.g. USD), shown beside the INR figure.
   const gstOutputByCcy = {};
   invoiceTxns.forEach(t=>{ const c = t.currency||'INR'; if(c==='INR') return; const x = calcTxnTotals(t).taxAmount; if(x) gstOutputByCcy[c] = round2((gstOutputByCcy[c]||0)+x); });
@@ -4901,12 +5023,521 @@ function taxComplianceData(year, month){
   const overdueDays = Math.floor((today - deadline) / 86400000);
 
   return { period, salaryTds, bySection, lineItems, totalsByReportCode, noTdsItems, assessmentYear, totalTdsToDeposit, tdsReceivable, receivableCount:receivableTxns.length,
-    gstInputExpenses, expensesCount:expensesThisMonth.length, gstOutput, gstOutputCcyText, gstPayable, deadline, overdueDays };
+    gstInputExpenses, expensesCount:expensesThisMonth.length, gstOutput, gm, gstOutputCcyText, gstPayable, deadline, overdueDays };
 }
+/* ===== GST payment panel, FY summary, CA statement, CA review workflow ===== */
+let _auditBypass = false;
+function csvDownload(name, rows){
+  const csv = rows.map(r=> r.map(v=>{ v = (v==null?'':v); return typeof v==='string' && /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
+function printModalDoc(title, bodyHtml){
+  openModal(`<div class="modal-head no-print"><h3>${esc(title)}</h3><button class="modal-close" id="mClose">✕</button></div>
+    <div id="printArea"><div class="payslip">
+      <div class="payslip-top"><div class="logo">${ORG.logo?`<img src="${ORG.logo}">`:(ORG.companyName||'C').charAt(0).toUpperCase()}</div>
+      <div class="conameblock"><div class="coname">${esc((ORG.companyName||'YOUR COMPANY').toUpperCase())}</div></div><div style="width:66px;"></div></div>
+      ${bodyHtml}</div></div>
+    <div class="btn-row no-print" style="margin-top:16px;"><button class="btn" id="printBtn">🖨️ Print / Save as PDF</button><button class="btn secondary" id="mCancel">Close</button></div>`, 'xwide');
+  document.getElementById('mClose').onclick = closeModal; document.getElementById('mCancel').onclick = closeModal;
+  document.getElementById('printBtn').onclick = ()=> window.print();
+}
+const GST_MONTHNAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function gstPeriodLabel(ym){ const [y,m]=ym.split('-').map(Number); return GST_MONTHNAMES[m-1]+' '+y; }
+function gstDue20(ym){ return ymAdd(ym,1)+'-20'; }
+function gstPanelHtml(year, month){
+  const g = gstPayablePanel(year, month);
+  const ed = canEdit();
+  const row = (label, h, sign)=> `<tr><td>${label}</td><td class="num-cell">${money2(h.igst)}</td><td class="num-cell">${money2(h.cgst)}</td><td class="num-cell">${money2(h.sgst)}</td><td class="num-cell"><b>${money2(gstHeadsTotal(h))}</b></td></tr>`;
+  const due = new Date(gstDue20(g.period)+'T00:00:00');
+  const overdue = g.balanceDue>0.5 && new Date()>due;
+  const op = ORG.openingITC||{};
+  return `
+  <div class="card" id="gstPanel" style="margin-top:14px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+      <div><h2 style="margin:0;">🧾 GST to Deposit — ${esc(gstPeriodLabel(g.period))}</h2>
+      <p style="color:var(--muted);font-size:12.5px;margin:2px 0 0;">Pay by <b>${due.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}</b> · ${g.invoiceCount} invoice(s) · figures in ₹</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${ed?`<button class="btn sm" id="gstPayBtn">💳 Record GST Payment</button><button class="btn secondary sm" id="gstBillBtn">+ GST Payment Bill</button>`:''}
+        <button class="btn secondary sm" id="gstCaBtn">📄 CA Statement</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px;"><table><thead><tr><th></th><th class="num-cell">IGST</th><th class="num-cell">CGST</th><th class="num-cell">SGST</th><th class="num-cell">Total</th></tr></thead><tbody>
+      ${row('Output tax on invoices', g.out)}
+      ${row('RCM liability (bills this month)', g.rcm)}
+      ${row('<span style="color:var(--good,#16a34a)">− ITC on bills (by GSTR-2B claim month)</span>', g.itc)}
+      ${row('<span style="color:var(--good,#16a34a)">− RCM ITC carried from previous month</span>', g.prevRcm)}
+      <tr class="totrow"><td><b>Net GST before credits</b></td><td colspan="3"></td><td class="num-cell"><b>${money2(g.net)}</b></td></tr>
+    </tbody></table></div>
+    <div style="margin-top:10px;"><b style="font-size:13px;">Manual credits</b> <span class="hint">(e.g. GST TDS deducted by clients)</span>
+      ${g.credits.map(c=>`<div style="display:flex;gap:8px;align-items:center;padding:3px 0;"><span style="flex:1;">${esc(c.label||'Credit')}</span><span>${money2(c.amount)}</span>${ed?`<button class="btn danger sm" data-gcdel="${esc(c.id)}">✕</button>`:''}</div>`).join('')||'<div class="hint">None for this month.</div>'}
+      ${ed?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><input id="gcLabel" placeholder="Description" style="padding:6px 8px;border:1px solid var(--rule);border-radius:8px;"><input id="gcAmt" type="number" step="0.01" placeholder="Amount ₹" style="padding:6px 8px;border:1px solid var(--rule);border-radius:8px;width:120px;"><button class="btn secondary sm" id="gcAdd">Add credit</button></div>`:''}
+    </div>
+    <table style="margin-top:12px;"><tbody>
+      <tr><td>Net after credits</td><td class="num-cell">${money2(g.afterCredits)}</td></tr>
+      <tr><td>ITC carried forward available (opening + earlier surplus)</td><td class="num-cell">${money2(g.cfIn)}</td></tr>
+      <tr><td>Cash to deposit — before using carried-forward ITC</td><td class="num-cell">${money2(g.payBefore)}</td></tr>
+      <tr class="totrow"><td><b>Cash to deposit — after carried-forward ITC</b></td><td class="num-cell"><b>${money2(g.payAfter)}</b></td></tr>
+      <tr><td>Paid so far</td><td class="num-cell">${money2(g.paid)}</td></tr>
+      <tr><td><b>Balance due</b></td><td class="num-cell" style="${overdue?'color:#DC2626;':''}"><b>${money2(g.balanceDue)}</b>${overdue?' (overdue)':''}</td></tr>
+      <tr><td>ITC carried forward to next month</td><td class="num-cell">${money2(g.cfOut)}</td></tr>
+    </tbody></table>
+    ${GST_PAYMENTS.filter(p=>p.period===g.period).length?`<div style="margin-top:8px;"><b style="font-size:13px;">Payments recorded</b>${GST_PAYMENTS.filter(p=>p.period===g.period).map(p=>`<div style="display:flex;gap:10px;padding:3px 0;font-size:12.5px;"><span>${esc(p.date)}</span><span>${money2(p.amount)}</span><span style="color:var(--muted);flex:1;">${esc(p.mode||'')} ${esc(p.ref||'')}</span>${ed?`<button class="btn danger sm" data-gpdel="${esc(p.id)}">✕</button>`:''}</div>`).join('')}</div>`:''}
+    <details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:700;">Financial-year summary (April–March) &amp; opening ITC</summary>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;">
+        <label>FY <select id="gfyYear" style="padding:6px 8px;border:1px solid var(--rule);border-radius:8px;">${[0,1,2,3].map(i=>{const y=(month>=4?year:year-1)-i;return `<option value="${y}">${y}-${String((y+1)%100).padStart(2,'0')}</option>`;}).join('')}</select></label>
+        <button class="btn sm" id="gfyShow">Show</button><button class="btn secondary sm" id="gfyCsv">📊 CSV (GSTR-9 workings)</button>
+        ${ed?`<span style="margin-left:auto;">Opening ITC ₹ <input id="oitcAmt" type="number" step="0.01" value="${op.amount||0}" style="width:110px;padding:6px;border:1px solid var(--rule);border-radius:8px;"> as of <input id="oitcAsOf" type="month" value="${esc((op.asOf||'2026-04').slice(0,7))}" style="padding:6px;border:1px solid var(--rule);border-radius:8px;"> <button class="btn secondary sm" id="oitcSave">Save</button></span>`:''}
+      </div><div id="gfyOut"></div>
+    </details>
+  </div>`;
+}
+function gstFyTableHtml(fy){
+  const s = gstFySummary(fy);
+  const f = n=> moneyPlain2(n);
+  return `<div style="overflow-x:auto;"><table><thead><tr><th>Month</th><th class="num-cell">Output</th><th class="num-cell">RCM</th><th class="num-cell">ITC</th><th class="num-cell">Prev RCM ITC</th><th class="num-cell">Credits</th><th class="num-cell">ITC b/f</th><th class="num-cell">ITC used</th><th class="num-cell">ITC c/f</th><th class="num-cell">Cash</th></tr></thead><tbody>
+  ${s.rows.map(r=>`<tr><td>${esc(gstPeriodLabel(r.ym))}</td><td class="num-cell">${f(gstHeadsTotal(r.d.out))}</td><td class="num-cell">${f(gstHeadsTotal(r.d.rcm))}</td><td class="num-cell">${f(gstHeadsTotal(r.d.itc))}</td><td class="num-cell">${f(gstHeadsTotal(r.d.prevRcm))}</td><td class="num-cell">${f(r.d.creditsTotal)}</td><td class="num-cell">${f(r.opening)}</td><td class="num-cell">${f(r.used)}</td><td class="num-cell">${f(r.closing)}</td><td class="num-cell"><b>${f(r.cash)}</b></td></tr>`).join('')}
+  <tr class="totrow"><td><b>FY total</b></td><td class="num-cell">${f(s.totals.out)}</td><td class="num-cell">${f(s.totals.rcm)}</td><td class="num-cell">${f(s.totals.itc)}</td><td class="num-cell">${f(s.totals.prevRcm)}</td><td class="num-cell">${f(s.totals.credits)}</td><td></td><td></td><td></td><td class="num-cell"><b>${f(s.totals.cash)}</b></td></tr></tbody></table></div>`;
+}
+function gstFyCsv(fy){
+  const s = gstFySummary(fy);
+  const rows=[[`GST annual reconciliation (GSTR-9 workings) FY ${fy}-${String((fy+1)%100).padStart(2,'0')} — INR`],[],
+    ['Month','Output IGST','Output CGST','Output SGST','RCM IGST','RCM CGST','RCM SGST','ITC IGST','ITC CGST','ITC SGST','Prev-month RCM ITC','Manual credits','ITC b/f','ITC used','ITC c/f','Cash paid/payable']];
+  s.rows.forEach(r=>rows.push([gstPeriodLabel(r.ym),r.d.out.igst,r.d.out.cgst,r.d.out.sgst,r.d.rcm.igst,r.d.rcm.cgst,r.d.rcm.sgst,r.d.itc.igst,r.d.itc.cgst,r.d.itc.sgst,gstHeadsTotal(r.d.prevRcm),r.d.creditsTotal,r.opening,r.used,r.closing,r.cash]));
+  rows.push(['FY total','','','','','','','','','',s.totals.prevRcm,s.totals.credits,'','','',s.totals.cash]);
+  csvDownload(`GST_FY_${fy}-${String((fy+1)%100).padStart(2,'0')}.csv`, rows);
+}
+function gstCaStatement(year, month){
+  const g = gstPayablePanel(year, month);
+  const h = (label,x)=>`<tr><td class="lbl">${label}</td><td class="val amtcell">${money2(x.igst)}</td><td class="val amtcell">${money2(x.cgst)}</td><td class="val amtcell">${money2(x.sgst)}</td><td class="val amtcell">${money2(gstHeadsTotal(x))}</td></tr>`;
+  const net = {igst:round2(g.out.igst+g.rcm.igst-g.itc.igst-g.prevRcm.igst), cgst:round2(g.out.cgst+g.rcm.cgst-g.itc.cgst-g.prevRcm.cgst), sgst:round2(g.out.sgst+g.rcm.sgst-g.itc.sgst-g.prevRcm.sgst)};
+  printModalDoc('GST statement for CA', `
+    <div class="payslip-title">GST LIABILITY STATEMENT — ${esc(gstPeriodLabel(g.period)).toUpperCase()}</div>
+    <p style="font-size:11px;">GSTIN: <b>${esc(ORG.gstin||'—')}</b> · Pay by ${esc(gstDue20(g.period))}</p>
+    <table class="pstable"><tr class="earnhead"><td></td><td class="amtcell">IGST</td><td class="amtcell">CGST</td><td class="amtcell">SGST</td><td class="amtcell">TOTAL</td></tr>
+      ${h('Output tax on invoices',g.out)}${h('RCM liability',g.rcm)}${h('Less: ITC on bills',g.itc)}${h('Less: RCM ITC (previous month)',g.prevRcm)}
+      ${h('<b>Net liability by head</b>',net)}
+      <tr><td class="lbl">Less: manual credits</td><td colspan="3"></td><td class="val amtcell">${money2(g.creditsTotal)}</td></tr>
+      <tr><td class="lbl">Net after credits</td><td colspan="3"></td><td class="val amtcell">${money2(g.afterCredits)}</td></tr>
+      <tr><td class="lbl">ITC carried forward available</td><td colspan="3"></td><td class="val amtcell">${money2(g.cfIn)}</td></tr>
+      <tr class="totrow"><td>Cash to deposit after carried-forward ITC</td><td colspan="3"></td><td class="amtcell">${money2(g.payAfter)}</td></tr>
+      <tr><td class="lbl">Balance in electronic cash ledger (CA to fill)</td><td colspan="3"></td><td class="val amtcell">₹ ____________</td></tr>
+      <tr><td class="lbl">Additional cash to be deposited (CA to fill)</td><td colspan="3"></td><td class="val amtcell">₹ ____________</td></tr>
+    </table>
+    <div class="regime-note">Invoice amounts in foreign currency are converted at each invoice's own exchange rate. Reconcile with GSTR-2B and the cash ledger before paying.</div>`);
+}
+function openGstPaymentModal(period){
+  const g = gstPayablePanel(+period.slice(0,4), +period.slice(5));
+  openModal(`<div class="modal-head"><h3>Record GST payment — ${esc(gstPeriodLabel(period))}</h3><button class="modal-close" id="mClose">✕</button></div>
+   <form id="gpForm"><div class="grid cols-2" style="gap:10px;">
+    <div class="field"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
+    <div class="field"><label>Amount ₹</label><input type="number" step="0.01" name="amount" value="${Math.max(0,g.balanceDue)}" required></div>
+    <div class="field"><label>Mode</label><select name="mode"><option>Bank Transfer</option><option>Net banking</option><option>Cash ledger</option><option>Other</option></select></div>
+    <div class="field"><label>Voucher / challan (CPIN) no.</label><input name="ref"></div></div>
+    <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
+  document.getElementById('mClose').onclick = closeModal; document.getElementById('mCancel').onclick = closeModal;
+  document.getElementById('gpForm').onsubmit = async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target);
+    const rec={ id:uid(), period, date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'' }; tagRecord(rec,true);
+    GST_PAYMENTS.push(rec); await saveGstPayments(); closeModal(); toast('GST payment recorded.'); render(); };
+}
+async function createGstPaymentBill(period){
+  const g = gstPayablePanel(+period.slice(0,4), +period.slice(5));
+  if(EXPENSES.some(e=>e.billType==='STATUTORY' && e.statutoryType==='GST_LIABILITY' && e.gstPeriod===period)){ toast('A GST payment bill already exists for this period.', true); return; }
+  if(g.payAfter<=0){ toast('Nothing to deposit for this period.', true); return; }
+  const rec={ id:uid(), billType:'STATUTORY', statutoryType:'GST_LIABILITY', gstPeriod:period, statutoryAmount:g.payAfter,
+    billDate:period+'-28', dueDate:gstDue20(period), description:`GST payable for ${gstPeriodLabel(period)}`, category:'Statutory', paidAmount:0, paymentMode:'', notes:'Auto-generated from Tax Compliance.' };
+  rec.billDate = new Date().toISOString().slice(0,10) > period+'-28' ? new Date().toISOString().slice(0,10) : period+'-28';
+  tagRecord(rec,true); rec.voucherNo = nextExpNo(); EXPENSES.push(rec);
+  if(await saveExpenses()===false) return;
+  toast(`GST payment bill ${rec.voucherNo} created for ${money(g.payAfter)}.`); render();
+}
+function bindGstPanel(c){
+  const y=taxComplianceYear, m=taxComplianceMonth, period=y+'-'+String(m).padStart(2,'0');
+  const q=id=>c.querySelector('#'+id);
+  if(q('gstPayBtn')) q('gstPayBtn').onclick=()=>openGstPaymentModal(period);
+  if(q('gstBillBtn')) q('gstBillBtn').onclick=()=>createGstPaymentBill(period);
+  q('gstCaBtn').onclick=()=>gstCaStatement(y,m);
+  if(q('gcAdd')) q('gcAdd').onclick=async()=>{ const amt=Number(q('gcAmt').value)||0; if(!amt){toast('Enter an amount.',true);return;}
+    ORG.gstCredits=ORG.gstCredits||{}; (ORG.gstCredits[period]=ORG.gstCredits[period]||[]).push({id:uid(),label:q('gcLabel').value||'Credit',amount:amt}); await saveOrg(); render(); };
+  c.querySelectorAll('[data-gcdel]').forEach(b=>b.onclick=async()=>{ ORG.gstCredits[period]=ORG.gstCredits[period].filter(x=>x.id!==b.dataset.gcdel); await saveOrg(); render(); });
+  c.querySelectorAll('[data-gpdel]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.gpdel; recordTombstone('gstPayments',id); GST_PAYMENTS=GST_PAYMENTS.filter(x=>x.id!==id); await saveGstPayments(); render(); });
+  q('gfyShow').onclick=()=>{ q('gfyOut').innerHTML=gstFyTableHtml(+q('gfyYear').value); };
+  q('gfyCsv').onclick=()=>gstFyCsv(+q('gfyYear').value);
+  if(q('oitcSave')) q('oitcSave').onclick=async()=>{ ORG.openingITC={amount:Number(q('oitcAmt').value)||0, asOf:q('oitcAsOf').value||'2026-04'}; await saveOrg(); toast('Opening ITC saved.'); render(); };
+}
+
+/* ===== CA review: query -> correction -> certify on tax entries ===== */
+function auditRole(){ return SESSION ? SESSION.role : ''; }
+function auditCanQuery(){ return ['Admin','Accounts','CA'].includes(auditRole()); }
+function auditCanCertify(){ return ['Admin','CA'].includes(auditRole()); }
+function auditCanRespond(){ return ['Admin','Accounts'].includes(auditRole()); }
+function auditItems(period){
+  const items=[];
+  TRANSACTIONS.filter(t=>t.txnCategory==='INVOICE' && (t.txnDate||'').slice(0,7)===period).forEach(t=>items.push({kind:'inv', rec:t, label:`Invoice ${t.txnNo||''} — ${t.partyName||''}`, amt:calcTxnTotals(t).taxAmountINR}));
+  EXPENSES.filter(e=>(e.billType||'SUPPLIER')==='SUPPLIER' && (e.billDate||'').slice(0,7)===period && (calcExpenseTotals(e).gstTotal>0||e.tdsApplicable)).forEach(e=>items.push({kind:'bill', rec:e, label:`Bill ${e.voucherNo||''} — ${e.vendorName||''}`, amt:calcExpenseTotals(e).gstTotal}));
+  return items;
+}
+function auditStatus(rec){ return (rec.taxAudit&&rec.taxAudit.status)||'Open'; }
+function auditCardHtml(period){
+  const items = auditItems(period);
+  const pill = s=>`<span class="pill ${{Open:'neutral',Query:'bad',Corrected:'warn',Certified:'good'}[s]}">${s}</span>`;
+  const cnt = s=>items.filter(i=>auditStatus(i.rec)===s).length;
+  return `<div class="card" id="auditCard" style="margin-top:14px;">
+    <h2 style="margin:0;">🔍 CA review — ${esc(gstPeriodLabel(period))}</h2>
+    <p style="color:var(--muted);font-size:12.5px;margin:2px 0 8px;">${cnt('Certified')} certified · ${cnt('Query')} open queries · ${cnt('Corrected')} awaiting CA re-check · ${cnt('Open')} not reviewed</p>
+    ${items.length?`<div style="overflow-x:auto;"><table><thead><tr><th>Entry</th><th class="num-cell">GST ₹</th><th>Status</th><th>Query / correction</th><th></th></tr></thead><tbody>
+    ${items.map((it,i)=>{ const a=it.rec.taxAudit||{}; const s=auditStatus(it.rec);
+      return `<tr><td>${esc(it.label)}</td><td class="num-cell">${moneyPlain2(it.amt)}</td><td>${pill(s)}${a.certBy?`<div class="hint">${esc(a.certBy)}</div>`:''}</td>
+      <td style="font-size:12px;">${a.query?`<b>Q:</b> ${esc(a.query)}`:''}${a.correction?`<br><b>A:</b> ${esc(a.correction)}`:''}</td>
+      <td style="white-space:nowrap;">${auditCanQuery()&&s!=='Certified'?`<button class="btn secondary sm" data-aq="${i}">Query</button> `:''}${auditCanRespond()&&s==='Query'?`<button class="btn secondary sm" data-ar="${i}">Respond</button> `:''}${auditCanCertify()&&s!=='Certified'&&s!=='Query'?`<button class="btn sm" data-ac="${i}">Certify</button>`:''}${auditCanCertify()&&s==='Certified'?`<button class="btn secondary sm" data-au="${i}">Reopen</button>`:''}</td></tr>`; }).join('')}
+    </tbody></table></div>`:'<div class="empty">No GST/TDS entries this month.</div>'}</div>`;
+}
+async function auditCommit(it){
+  _auditBypass = true;
+  try{
+    tagRecord(it.rec,false);
+    const ok = it.kind==='inv' ? await saveTransactions() : await saveExpenses();
+    if(ok!==false && typeof driveSyncNow==='function'){ try{ await driveSyncNow(); }catch(e){} }
+  } finally { _auditBypass = false; }
+  render();
+}
+function auditPrompt(title, label, cb){
+  openModal(`<div class="modal-head"><h3>${esc(title)}</h3><button class="modal-close" id="mClose">✕</button></div>
+   <form id="auForm"><div class="field"><label>${esc(label)}</label><textarea name="t" rows="4" required></textarea></div>
+   <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
+  document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('auForm').onsubmit=async e=>{ e.preventDefault(); const t=new FormData(e.target).get('t'); closeModal(); await cb(t); };
+}
+function bindAuditCard(c, period){
+  const items = auditItems(period); const who = ()=> (SESSION&&SESSION.name)||'Unknown';
+  const hist=(rec,txt)=>{ rec.taxAudit=rec.taxAudit||{}; (rec.taxAudit.history=rec.taxAudit.history||[]).push({at:new Date().toISOString(), by:who(), role:auditRole(), text:txt}); };
+  c.querySelectorAll('[data-aq]').forEach(b=>b.onclick=()=>{ const it=items[+b.dataset.aq]; auditPrompt('Raise query','Question for the accounts team',async t=>{ it.rec.taxAudit=Object.assign(it.rec.taxAudit||{},{status:'Query',query:t,correction:'',certBy:''}); hist(it.rec,'Query: '+t); await auditCommit(it); }); });
+  c.querySelectorAll('[data-ar]').forEach(b=>b.onclick=()=>{ const it=items[+b.dataset.ar]; auditPrompt('Respond / correction','What was corrected or clarified?',async t=>{ it.rec.taxAudit=Object.assign(it.rec.taxAudit||{},{status:'Corrected',correction:t}); hist(it.rec,'Response: '+t); await auditCommit(it); }); });
+  c.querySelectorAll('[data-ac]').forEach(b=>b.onclick=async()=>{ const it=items[+b.dataset.ac]; it.rec.taxAudit=Object.assign(it.rec.taxAudit||{},{status:'Certified',certBy:who()+' · '+new Date().toLocaleDateString('en-IN'),certAt:new Date().toISOString()}); hist(it.rec,'Certified'); await auditCommit(it); });
+  c.querySelectorAll('[data-au]').forEach(b=>b.onclick=async()=>{ const it=items[+b.dataset.au]; it.rec.taxAudit=Object.assign(it.rec.taxAudit||{},{status:'Open',certBy:''}); hist(it.rec,'Reopened'); await auditCommit(it); });
+}
+
+/* IGST if either GSTIN is missing or the 2-digit state codes differ; otherwise CGST+SGST. */
+function shouldUseIGST(partyGstin){
+  const a=(ORG.gstin||'').trim().toUpperCase(), b=(partyGstin||'').trim().toUpperCase();
+  if(a.length<2 || b.length<2) return true;
+  return a.slice(0,2)!==b.slice(0,2);
+}
+function autoPickGstMode(partySelId, modeSelId){
+  const ps=document.getElementById(partySelId), ms=document.getElementById(modeSelId);
+  if(!ps||!ms) return;
+  ps.addEventListener('change', ()=>{
+    const party=PARTIES.find(p=>p.id===ps.value);
+    if(!party || ms.disabled || ms.value==='None') return;
+    const want = shouldUseIGST(party.gstNumber)?'Inter':'Intra';
+    if(ms.value!==want){ ms.value=want; ms.dispatchEvent(new Event('change',{bubbles:true})); ms.dispatchEvent(new Event('input',{bubbles:true})); }
+  });
+}
+/* ===== ESIC liability, statutory bills (mark paid), monthly compliance checklist ===== */
+function esicLiabilityData(year, month){
+  const period = year+'-'+String(month).padStart(2,'0');
+  const rows = PAYSLIPS.filter(p=>p.period===period && (p.esi||0)>0).map(p=>{
+    const emp = EMPLOYEES.find(x=>x.id===p.empId);
+    const wages = Math.round(p.gross||0);
+    const employee = Math.ceil(p.esi||0);                 // ESIC rounds contributions up to the next rupee
+    const employer = Math.ceil((p.gross||0)*0.0325);
+    return { name:p.empName||(emp?emp.name:'—'), esicNo:emp?emp.esicNo:'', wages, employee, employer, total:employee+employer };
+  });
+  const totals = rows.reduce((s,r)=>({wages:s.wages+r.wages, employee:s.employee+r.employee, employer:s.employer+r.employer, total:s.total+r.total}),{wages:0,employee:0,employer:0,total:0});
+  return { period, rows, totals, deadline:new Date(month===12?year+1:year, (month===12?1:month+1)-1, 15) };
+}
+async function createStatutoryBill(type, period, amount, dueDate, description){
+  if(EXPENSES.some(e=>e.billType==='STATUTORY' && e.statutoryType===type && (e.gstPeriod||e.statPeriod||(e.billDate||'').slice(0,7))===period)){ toast(type+' bill already exists for this period — check Bills & Expenses.', true); return; }
+  if(!(amount>0)){ toast('Nothing to pay for this period.', true); return; }
+  const rec={ id:uid(), billType:'STATUTORY', statutoryType:type, statPeriod:period, statutoryAmount:amount, billDate:period+'-01', dueDate, description, category:'Statutory', paidAmount:0, paymentMode:'', notes:'Auto-generated from Tax Compliance.' };
+  tagRecord(rec,true); rec.voucherNo=nextExpNo(); EXPENSES.push(rec);
+  if(await saveExpenses()===false){ toast('Could not save the bill.', true); return; }
+  toast(`${type} bill ${rec.voucherNo} created for ${money(amount)}.`); render();
+}
+function statBillFor(type, period){
+  return EXPENSES.find(e=>e.billType==='STATUTORY' && e.statutoryType===type && (e.gstPeriod||e.statPeriod||(e.billDate||'').slice(0,7))===period);
+}
+/* Payments are kept as a list on the bill (paymentsMade) so the bank ledger sees every part-payment. */
+function billPayments(e){
+  if(Array.isArray(e.paymentsMade) && e.paymentsMade.length){
+    const sum = e.paymentsMade.reduce((s,x)=>s+(Number(x.amount)||0),0), diff = round2((Number(e.paidAmount)||0)-sum);
+    // paid amount edited on the bill form after part-payments were logged: show the difference as one extra line
+    return diff>0.5 ? e.paymentsMade.concat([{id:'legacy-diff', date:e.paymentDate||e.billDate||'', amount:diff, mode:e.paymentMode||'', ref:e.paymentRef||'', bank:'', legacy:true}]) : e.paymentsMade;
+  }
+  if((Number(e.paidAmount)||0)>0) return [{id:'legacy', date:e.paymentDate||e.billDate||'', amount:Number(e.paidAmount)||0, mode:e.paymentMode||'', ref:e.paymentRef||'', bank:e.paidFrom||'', legacy:true}];
+  return [];
+}
+function openMarkBillPaid(billId){
+  const e = EXPENSES.find(x=>x.id===billId); if(!e) return;
+  const t = calcExpenseTotals(e);
+  openModal(`<div class="modal-head"><h3>Record payment — ${esc(e.voucherNo||'')}</h3><button class="modal-close" id="mClose">✕</button></div>
+   <p class="hint">${esc(e.description||'')} · Balance ${money2(t.balance)}</p>
+   <form id="mbpForm"><div class="grid cols-2" style="gap:10px;">
+    <div class="field"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
+    <div class="field"><label>Amount ₹</label><input type="number" step="0.01" name="amount" value="${Math.max(0,round2(t.balance))}" required></div>
+    <div class="field"><label>Mode</label><select name="mode"><option>Bank Transfer</option><option>Net banking</option><option>UPI</option><option>Cheque</option><option>Cash</option></select></div>
+    <div class="field"><label>Reference / challan no.</label><input name="ref"></div></div>
+    <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
+  document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('mbpForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); if(!bankGuardDate(fd.get('date'))) return;
+    const list = billPayments(e).filter(x=>!x.legacy).slice(); if(!list.length && (Number(e.paidAmount)||0)>0) list.push(billPayments(e)[0]);
+    list.push({id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'', bank:''});
+    e.paymentsMade = list.map(x=>Object.assign({},x,{legacy:undefined}));
+    e.paidAmount = round2(list.reduce((s,x)=>s+(Number(x.amount)||0),0));
+    const last = list[list.length-1]; e.paymentDate=last.date; e.paymentMode=last.mode; e.paymentRef=last.ref;
+    tagRecord(e,false); await saveExpenses(); closeModal(); toast('Payment recorded.'); render(); };
+}
+function statutoryCardHtml(d, pf, esic, year, month){
+  const period = year+'-'+String(month).padStart(2,'0');
+  const ed = canEdit();
+  const tdsDue = new Date(month===12?year+1:year, (month===12?1:month+1)-1, 7);
+  const items = [
+    {type:'TDS', label:'TDS (salary + vendors)', amt:d.totalTdsToDeposit, due:tdsDue, desc:`TDS deposit for ${gstPeriodLabel(period)}`},
+    {type:'PF', label:'Provident Fund', amt:pf.totals.total, due:pf.deadline, desc:`EPF contribution for ${gstPeriodLabel(period)}`},
+    {type:'ESIC', label:'ESIC', amt:esic.totals.total, due:esic.deadline, desc:`ESIC contribution (employee + employer) for ${gstPeriodLabel(period)}`}
+  ];
+  return `<div class="card" id="statCard" style="margin-top:14px;">
+    <h2 style="margin:0;">📌 Statutory dues — ${esc(gstPeriodLabel(period))}</h2>
+    <p style="color:var(--muted);font-size:12.5px;margin:2px 0 8px;">ESIC: ${esic.rows.length} staff · employee ${money2(esic.totals.employee)} + employer ${money2(esic.totals.employer)} (rounded up to the rupee)</p>
+    <table><thead><tr><th>Due</th><th class="num-cell">Amount</th><th>Due date</th><th>Bill</th><th>Paid</th><th></th></tr></thead><tbody>
+    ${items.map(it=>{ const b=statBillFor(it.type,period); const t=b?calcExpenseTotals(b):null;
+      return `<tr><td>${esc(it.label)}</td><td class="num-cell">${money2(it.amt)}</td><td>${it.due.toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</td>
+      <td>${b?esc(b.voucherNo):'—'}</td><td>${t?`${money2(b.paidAmount||0)} ${expStatusPill(t.payStatus)}`:'—'}</td>
+      <td style="white-space:nowrap;">${ed?(b?(t.payStatus!=='Paid'?`<button class="btn secondary sm" data-paybill="${esc(b.id)}">Mark paid</button>`:''):(it.amt>0?`<button class="btn sm" data-mkbill="${it.type}">+ Create bill</button>`:'')):''}</td></tr>`; }).join('')}
+    </tbody></table>
+    ${esic.rows.length?`<details style="margin-top:8px;"><summary style="cursor:pointer;">ESIC detail</summary><table><thead><tr><th>Staff</th><th>ESIC no.</th><th class="num-cell">Wages</th><th class="num-cell">Employee 0.75%</th><th class="num-cell">Employer 3.25%</th><th class="num-cell">Total</th></tr></thead><tbody>
+      ${esic.rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.esicNo||'')}</td><td class="num-cell">${money2(r.wages)}</td><td class="num-cell">${money2(r.employee)}</td><td class="num-cell">${money2(r.employer)}</td><td class="num-cell">${money2(r.total)}</td></tr>`).join('')}
+      <tr class="totrow"><td colspan="2"><b>Total</b></td><td class="num-cell">${money2(esic.totals.wages)}</td><td class="num-cell">${money2(esic.totals.employee)}</td><td class="num-cell">${money2(esic.totals.employer)}</td><td class="num-cell"><b>${money2(esic.totals.total)}</b></td></tr></tbody></table></details>`:''}
+  </div>`;
+}
+const COMPLIANCE_CHECK_ITEMS = [
+  {k:'payslips', label:'Payslips generated', due:null},
+  {k:'tds', label:'TDS deposited (by 7th)', due:'7'},
+  {k:'gstr1', label:'GSTR-1 filed (by 11th)', due:'11'},
+  {k:'pf', label:'PF deposited + ECR filed (by 15th)', due:'15'},
+  {k:'esic', label:'ESIC deposited (by 15th)', due:'15'},
+  {k:'gstr3b', label:'GSTR-3B filed + GST paid (by 20th)', due:'20'}
+];
+function complianceChecklistHtml(year, month){
+  const period = year+'-'+String(month).padStart(2,'0'); const ticks=(ORG.complianceChecks&&ORG.complianceChecks[period])||{}; const ed=canEdit();
+  const auto = {
+    payslips: PAYSLIPS.some(p=>p.period===period),
+    tds: (b=>b&&calcExpenseTotals(b).payStatus==='Paid')(statBillFor('TDS',period)),
+    pf: (b=>b&&calcExpenseTotals(b).payStatus==='Paid')(statBillFor('PF',period)),
+    esic: (b=>b&&calcExpenseTotals(b).payStatus==='Paid')(statBillFor('ESIC',period))
+  };
+  const done = k=> !!ticks[k] || !!auto[k];
+  const n = COMPLIANCE_CHECK_ITEMS.filter(i=>done(i.k)).length;
+  return `<div class="card" id="chkCard" style="margin-top:14px;"><h2 style="margin:0;">✅ Compliance checklist — ${esc(gstPeriodLabel(period))} <span class="pill ${n===COMPLIANCE_CHECK_ITEMS.length?'good':'warn'}">${n}/${COMPLIANCE_CHECK_ITEMS.length}</span></h2>
+   ${COMPLIANCE_CHECK_ITEMS.map(i=>`<label style="display:flex;gap:8px;align-items:center;padding:4px 0;"><input type="checkbox" data-chk="${i.k}" ${done(i.k)?'checked':''} ${(!ed||auto[i.k])?'disabled':''}> ${esc(i.label)}${auto[i.k]?' <span class="hint">(auto)</span>':''}</label>`).join('')}</div>`;
+}
+function bindStatutory(c, d, pf, esic){
+  const period = taxComplianceYear+'-'+String(taxComplianceMonth).padStart(2,'0');
+  c.querySelectorAll('[data-mkbill]').forEach(b=>b.onclick=()=>{
+    const t=b.dataset.mkbill, mn=gstPeriodLabel(period);
+    if(t==='TDS') createStatutoryBill('TDS',period,d.totalTdsToDeposit,localYmd(d.deadline),`TDS deposit for ${mn}`);
+    if(t==='PF') createStatutoryBill('PF',period,pf.totals.total,localYmd(pf.deadline),`EPF contribution for ${mn}`);
+    if(t==='ESIC') createStatutoryBill('ESIC',period,esic.totals.total,localYmd(esic.deadline),`ESIC contribution for ${mn}`);
+  });
+  c.querySelectorAll('[data-paybill]').forEach(b=>b.onclick=()=>openMarkBillPaid(b.dataset.paybill));
+  c.querySelectorAll('[data-chk]').forEach(b=>b.onchange=async()=>{ ORG.complianceChecks=ORG.complianceChecks||{}; (ORG.complianceChecks[period]=ORG.complianceChecks[period]||{})[b.dataset.chk]=b.checked; await saveOrg(); render(); });
+}
+
+/* ============================= BANK RECONCILIATION (single account) =============================
+   Money in : invoice payments received (net of client TDS / credit notes when derived), other income.
+   Money out: bill payments (incl. PF / ESIC / TDS / GST statutory bills) and salary.
+   A period is verified against the bank statement and then locked. */
+const BANK_DEFAULT_START = '2026-04-01';
+let bankFrom = '', bankTo = '', bankView = 'all';
+function bankStart(){ return (ORG.bankStartDate || BANK_DEFAULT_START); }
+function bankLastVerified(){ const l=BANK_RECONS.filter(r=>!r.unlocked).sort((a,b)=>a.to<b.to?-1:1); return l.length?l[l.length-1]:null; }
+function bankLockedThrough(){ const r=bankLastVerified(); return r?r.to:''; }
+function dayAdd(d, n){ const x=new Date(d+'T00:00:00'); x.setDate(x.getDate()+n); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); }
+function invoiceNetReceivable(t){
+  const cn = TRANSACTIONS.filter(x=>x.txnCategory==='CREDIT_NOTE' && x.reference && x.reference===t.txnNo).reduce((s,x)=>s+calcTxnTotals(x).grandTotalINR,0);
+  const tds = Number(t.tdsDeductedByClient)||0;
+  return { gross:calcTxnTotals(t).grandTotalINR, tds, cn:round2(cn), net: round2(Math.max(0, calcTxnTotals(t).grandTotalINR - tds - cn)) };
+}
+function invoicePayments(t){
+  if(Array.isArray(t.paymentsReceived) && t.paymentsReceived.length) return t.paymentsReceived;
+  if(t.status==='Paid' && (t.txnDate||'')>=bankStart()){
+    const n = invoiceNetReceivable(t);
+    return [{id:'legacy', date:t.txnDate, amount:n.net, mode:'', ref:'', bank:'', legacy:true}];
+  }
+  return [];
+}
+function bankEntries(){
+  const st = bankStart(), out = [];
+  TRANSACTIONS.filter(t=>t.txnCategory==='INVOICE').forEach(t=>{
+    invoicePayments(t).forEach(p=>{ if((p.date||'')<st || !(Number(p.amount)>0)) return;
+      out.push({ date:p.date, dir:'in', amount:Number(p.amount), desc:`Invoice ${t.txnNo} — ${t.partyName||''}`, mode:p.mode||'', ref:p.ref||'', src:'Invoice', assumed:!!p.legacy, srcId:t.id, payId:p.id }); });
+  });
+  const salaryBillMonths = new Set(EXPENSES.filter(e=>e.billType==='SALARY' && billPayments(e).length).map(e=>e.salaryMonth).filter(Boolean));
+  EXPENSES.filter(e=>e.billType!=='INTERBANK').forEach(e=>{
+    billPayments(e).forEach(p=>{
+      const date = p.date || e.billDate || ''; if(date<st || !(Number(p.amount)>0)) return;
+      const type = e.billType==='STATUTORY' ? (e.statutoryType||'Statutory') : (e.billType==='SALARY'?'Salary':'Bill');
+      out.push({ date, dir:'out', amount:Number(p.amount), desc:`${e.voucherNo||''} — ${e.billType==='SALARY'?(e.employeeName||'Salary'):e.billType==='STATUTORY'?(e.description||type):(e.vendorName||e.description||'')}`, mode:p.mode||'', ref:p.ref||'', src:type, assumed:!!p.legacy && !e.paymentDate, srcId:e.id, payId:p.id });
+    });
+  });
+  // Salary from payslips (assumed paid on month-end) unless a Salary bill already tracks that month.
+  const byPeriod = {};
+  PAYSLIPS.forEach(p=>{ if(!p.period) return; (byPeriod[p.period]=byPeriod[p.period]||[]).push(p); });
+  Object.keys(byPeriod).forEach(per=>{
+    if(salaryBillMonths.has(per)) return;
+    const [y,m]=per.split('-').map(Number); const date = per+'-'+String(new Date(y,m,0).getDate()).padStart(2,'0');
+    if(date<st) return;
+    const latest = {}; byPeriod[per].forEach(p=>{ if(!latest[p.empId] || new Date(p.generatedAt||0)>new Date(latest[p.empId].generatedAt||0)) latest[p.empId]=p; });
+    const total = round2(Object.values(latest).reduce((s,p)=>s+(Number(p.netPay)||0),0));
+    if(total>0) out.push({ date, dir:'out', amount:total, desc:`Salary ${gstPeriodLabel(per)} (${Object.keys(latest).length} staff, net pay)`, mode:'', ref:'', src:'Salary', assumed:true, srcId:'sal-'+per });
+  });
+  OTHER_INCOME.forEach(o=>{ if((o.date||'')<st) return; out.push({ date:o.date, dir:'in', amount:Number(o.amount)||0, desc:`${o.type||'Other income'}${o.note?' — '+o.note:''}`, mode:o.mode||'', ref:o.ref||'', src:'Other income', assumed:false, srcId:o.id, other:true }); });
+  return out.sort((a,b)=> a.date<b.date?-1: a.date>b.date?1: (a.dir==='in'?-1:1));
+}
+function bankOpeningBase(){ return Number(ORG.bankOpening&&ORG.bankOpening.amount)||0; }
+/* Opening balance on `from`: last verified statement closing if it ends the day before, else base + book movements before it. */
+function bankOpeningOn(from, entries){
+  const lv = BANK_RECONS.filter(r=>!r.unlocked && dayAdd(r.to,1)<=from).sort((a,b)=>a.to<b.to?-1:1).pop();
+  let bal = lv ? Number(lv.statementBalance) : bankOpeningBase();
+  const since = lv ? dayAdd(lv.to,1) : '';
+  entries.forEach(e=>{ if(e.date<from && (!since || e.date>=since)) bal += e.dir==='in'?e.amount:-e.amount; });
+  return { bal:round2(bal), fromVerified:lv };
+}
+function bankDefaultRange(){
+  const lt = bankLockedThrough(); const today = new Date().toISOString().slice(0,10);
+  const from = lt ? dayAdd(lt,1) : bankStart();
+  return [from, today<from?from:today];
+}
+function bankLedger(from, to){
+  const all = bankEntries(); const op = bankOpeningOn(from, all);
+  let bal = op.bal; const rows = all.filter(e=>e.date>=from && e.date<=to).map(e=>{ bal = round2(bal + (e.dir==='in'?e.amount:-e.amount)); return Object.assign({}, e, {balance:bal}); });
+  const totIn = round2(rows.filter(r=>r.dir==='in').reduce((s,r)=>s+r.amount,0)), totOut = round2(rows.filter(r=>r.dir==='out').reduce((s,r)=>s+r.amount,0));
+  return { opening:op.bal, openingVerified:op.fromVerified, rows, totIn, totOut, closing:round2(op.bal+totIn-totOut) };
+}
+function bankGuardDate(d){ const lt=bankLockedThrough(); if(lt && d<=lt){ toast(`Bank period up to ${lt} is verified and locked — unlock it first.`, true); return false; } return true; }
+function openInvoicePaymentModal(){
+  const open = TRANSACTIONS.filter(t=>t.txnCategory==='INVOICE' && t.status!=='Draft' && (t.txnDate||'')>=bankStart().slice(0,0)).map(t=>{ const n=invoiceNetReceivable(t); const rec=invoicePayments(t).reduce((s,p)=>s+(Number(p.amount)||0),0); return {t,n,rec,left:round2(n.net-rec)}; }).filter(x=>x.left>0.5 || !x.t.paymentsReceived);
+  openModal(`<div class="modal-head"><h3>Invoice payment received</h3><button class="modal-close" id="mClose">✕</button></div>
+   <form id="ipForm"><div class="grid cols-2" style="gap:10px;">
+    <div class="field" style="grid-column:1/-1"><label>Invoice</label><select name="inv" id="ipInv" required><option value="">— select —</option>${open.map(x=>`<option value="${x.t.id}" data-left="${x.left}">${esc(x.t.txnNo)} — ${esc(x.t.partyName||'')} · due ${moneyPlain2(x.left)} (after client TDS ${moneyPlain2(x.n.tds)} / credit notes ${moneyPlain2(x.n.cn)})</option>`).join('')}</select></div>
+    <div class="field"><label>Date received</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
+    <div class="field"><label>Amount credited in bank ₹</label><input type="number" step="0.01" name="amount" id="ipAmt" required></div>
+    <div class="field"><label>Mode</label><select name="mode"><option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Cash</option><option>Foreign remittance</option></select></div>
+    <div class="field"><label>Reference / UTR</label><input name="ref"></div></div>
+    <p class="hint">Client TDS and credit notes are not part of the bank credit — enter only what reached the bank.</p>
+    <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
+  document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('ipInv').onchange=e=>{ const o=e.target.selectedOptions[0]; document.getElementById('ipAmt').value = o&&o.dataset.left?Math.max(0,Number(o.dataset.left)):''; };
+  document.getElementById('ipForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); const t=TRANSACTIONS.find(x=>x.id===fd.get('inv')); if(!t) return;
+    if(!bankGuardDate(fd.get('date'))) return;
+    const list = Array.isArray(t.paymentsReceived)?t.paymentsReceived.slice():[];
+    list.push({id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, mode:fd.get('mode'), ref:fd.get('ref')||'', bank:ORG.bankName||''});
+    t.paymentsReceived = list; tagRecord(t,false); await saveTransactions(); closeModal(); toast('Payment recorded.'); render(); };
+}
+function openOtherIncomeModal(){
+  openModal(`<div class="modal-head"><h3>Other income</h3><button class="modal-close" id="mClose">✕</button></div>
+   <form id="oiForm"><div class="grid cols-2" style="gap:10px;">
+    <div class="field"><label>Date</label><input type="date" name="date" value="${new Date().toISOString().slice(0,10)}" required></div>
+    <div class="field"><label>Amount ₹</label><input type="number" step="0.01" name="amount" required></div>
+    <div class="field"><label>Type</label><select name="type"><option>Bank interest</option><option>FD interest / maturity</option><option>Refund</option><option>Other</option></select></div>
+    <div class="field"><label>Reference</label><input name="ref"></div>
+    <div class="field" style="grid-column:1/-1"><label>Note</label><input name="note"></div></div>
+    <div class="btn-row"><button class="btn" type="submit">Save</button><button class="btn secondary" type="button" id="mCancel">Cancel</button></div></form>`);
+  document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('oiForm').onsubmit=async ev=>{ ev.preventDefault(); const fd=new FormData(ev.target); if(!bankGuardDate(fd.get('date'))) return;
+    const rec={id:uid(), date:fd.get('date'), amount:Number(fd.get('amount'))||0, type:fd.get('type'), ref:fd.get('ref')||'', note:fd.get('note')||'', mode:'Bank'}; tagRecord(rec,true);
+    OTHER_INCOME.push(rec); await saveOtherIncome(); closeModal(); toast('Other income recorded.'); render(); };
+}
+function openBillPaymentPicker(){
+  const open = EXPENSES.filter(e=>e.billType!=='INTERBANK' && calcExpenseTotals(e).balance>0.5);
+  openModal(`<div class="modal-head"><h3>Bill payment made</h3><button class="modal-close" id="mClose">✕</button></div>
+   <div class="field"><label>Bill</label><select id="bpSel"><option value="">— select —</option>${open.map(e=>`<option value="${e.id}">${esc(e.voucherNo||'')} — ${esc(e.vendorName||e.employeeName||e.description||'')} · balance ${moneyPlain2(calcExpenseTotals(e).balance)}</option>`).join('')}</select></div>
+   <div class="btn-row"><button class="btn" id="bpGo">Next</button><button class="btn secondary" id="mCancel">Cancel</button></div>`);
+  document.getElementById('mClose').onclick=closeModal; document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('bpGo').onclick=()=>{ const id=document.getElementById('bpSel').value; if(id) openMarkBillPaid(id); };
+}
+function renderBank(c, actions){
+  const ed = canEdit();
+  actions.innerHTML = ed ? `<button class="btn" id="bkInv">+ Invoice payment</button> <button class="btn secondary" id="bkBill">+ Bill payment</button> <button class="btn secondary" id="bkOth">+ Other income</button>` : '';
+  if(!bankFrom || !bankTo){ [bankFrom, bankTo] = bankDefaultRange(); }
+  const L = bankLedger(bankFrom, bankTo);
+  const lv = bankLastVerified(); const lt = bankLockedThrough();
+  const hist = BANK_RECONS.slice().sort((a,b)=>a.to<b.to?1:-1);
+  const view = r=> bankView==='all' || (bankView==='in'&&r.dir==='in') || (bankView==='out'&&r.dir==='out');
+  c.innerHTML = `
+   <div class="card">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+      <div class="field"><label>From</label><input type="date" id="bkFrom" value="${bankFrom}"></div>
+      <div class="field"><label>To</label><input type="date" id="bkTo" value="${bankTo}"></div>
+      <div class="field"><label>Show</label><select id="bkView"><option value="all" ${bankView==='all'?'selected':''}>All</option><option value="in" ${bankView==='in'?'selected':''}>Income (received)</option><option value="out" ${bankView==='out'?'selected':''}>Spending (paid)</option></select></div>
+      <button class="btn secondary sm" id="bkNext">Next unverified period</button>
+      <button class="btn secondary sm" id="bkPdf">📄 Ledger PDF</button>
+      ${ed?`<span style="margin-left:auto;">Opening balance ₹ <input id="bkOpenAmt" type="number" step="0.01" value="${bankOpeningBase()}" style="width:120px;padding:6px;border:1px solid var(--rule);border-radius:8px;"> on <input id="bkStartDate" type="date" value="${bankStart()}" style="padding:6px;border:1px solid var(--rule);border-radius:8px;"> <button class="btn secondary sm" id="bkOpenSave">Save</button></span>`:''}
+    </div>
+    <div class="grid cols-4" style="gap:12px;margin-top:12px;">
+      <div class="stat" style="background:var(--g-blue);"><div class="n">${money(L.opening)}</div><div class="l">Opening${L.openingVerified?' (verified '+esc(L.openingVerified.to)+')':''}</div></div>
+      <div class="stat" style="background:var(--g-green);"><div class="n">${money(L.totIn)}</div><div class="l">Income received</div></div>
+      <div class="stat" style="background:var(--g-red);"><div class="n">${money(L.totOut)}</div><div class="l">Spending paid</div></div>
+      <div class="stat" style="background:var(--g-orange);"><div class="n">${money(L.closing)}</div><div class="l">Closing (books)</div></div>
+    </div>
+    ${lt?`<p class="hint">🔒 Verified and locked up to <b>${esc(lt)}</b>. Entries on or before this date cannot be added.</p>`:''}
+    <div style="overflow-x:auto;margin-top:8px;"><table><thead><tr><th>Date</th><th>Particulars</th><th>Type</th><th>Mode / Ref</th><th class="num-cell">Received</th><th class="num-cell">Paid</th><th class="num-cell">Balance</th></tr></thead><tbody>
+     <tr><td>${esc(bankFrom)}</td><td colspan="5"><i>Opening balance</i></td><td class="num-cell">${money2(L.opening)}</td></tr>
+     ${L.rows.filter(view).map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.desc)}${r.assumed?' <span class="pill neutral" title="No payment date recorded — using the document date">assumed date</span>':''}</td><td>${esc(r.src)}</td><td style="color:var(--muted);">${esc((r.mode+' '+r.ref).trim())}</td>
+       <td class="num-cell">${r.dir==='in'?money2(r.amount):''}</td><td class="num-cell">${r.dir==='out'?money2(r.amount):''}</td><td class="num-cell">${money2(r.balance)}</td>
+       </tr>`).join('')||'<tr><td colspan="7"><div class="empty">No bank movements in this range.</div></td></tr>'}
+    </tbody></table></div>
+   </div>
+   <div class="card" style="margin-top:14px;"><h2 style="margin:0;">Verify against bank statement</h2>
+    <p class="hint">Enter the closing balance from the bank statement for ${esc(bankFrom)} → ${esc(bankTo)}. Books say <b>${money2(L.closing)}</b>.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+      <div class="field"><label>Statement closing balance ₹</label><input type="number" step="0.01" id="bkStmt" value="${L.closing}"></div>
+      <div class="field"><label>Note</label><input id="bkNote" placeholder="optional"></div>
+      <div>Difference: <b id="bkDiff">${money2(0)}</b></div>
+      ${ed?`<button class="btn" id="bkVerify">🔒 Verify &amp; lock period</button>`:''}
+    </div>
+    <h3 style="margin:14px 0 6px;">Verified periods</h3>
+    ${hist.length?`<table><thead><tr><th>Period</th><th class="num-cell">Opening</th><th class="num-cell">Books</th><th class="num-cell">Statement</th><th class="num-cell">Diff</th><th>By</th><th></th></tr></thead><tbody>
+     ${hist.map(h=>`<tr style="${h.unlocked?'opacity:.5':''}"><td>${esc(h.from)} → ${esc(h.to)}${h.unlocked?' (unlocked)':''}</td><td class="num-cell">${money2(h.opening)}</td><td class="num-cell">${money2(h.booksClosing)}</td><td class="num-cell">${money2(h.statementBalance)}</td><td class="num-cell">${money2(h.difference)}</td><td>${esc(h.verifiedBy||'')} · ${esc((h.verifiedAt||'').slice(0,10))}${h.note?'<br><span class="hint">'+esc(h.note)+'</span>':''}</td>
+       <td>${ed&&SESSION&&SESSION.role==='Admin'&&!h.unlocked&&lv&&lv.id===h.id?`<button class="btn danger sm" data-unlock="${esc(h.id)}">Unlock</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<div class="hint">No period verified yet.</div>'}
+   </div>`;
+  const q=id=>c.querySelector('#'+id);
+  const re=()=>renderBank(c,actions);
+  q('bkFrom').onchange=e=>{ bankFrom=e.target.value; re(); };
+  q('bkTo').onchange=e=>{ bankTo=e.target.value; re(); };
+  q('bkView').onchange=e=>{ bankView=e.target.value; re(); };
+  q('bkNext').onclick=()=>{ [bankFrom,bankTo]=bankDefaultRange(); re(); };
+  q('bkPdf').onclick=()=>bankLedgerPdf(L);
+  const upd=()=>{ q('bkDiff').textContent = money2(round2((Number(q('bkStmt').value)||0)-L.closing)); }; q('bkStmt').oninput=upd; upd();
+  if(ed){
+    actions.querySelector('#bkInv').onclick=openInvoicePaymentModal; actions.querySelector('#bkBill').onclick=openBillPaymentPicker; actions.querySelector('#bkOth').onclick=openOtherIncomeModal;
+    q('bkOpenSave').onclick=async()=>{ ORG.bankOpening={amount:Number(q('bkOpenAmt').value)||0}; ORG.bankStartDate=q('bkStartDate').value||BANK_DEFAULT_START; await saveOrg(); toast('Opening balance saved.'); bankFrom=''; render(); };
+    q('bkVerify').onclick=async()=>{
+      if(bankFrom>bankTo){ toast('From date is after To date.', true); return; }
+      const need = lt ? dayAdd(lt,1) : bankStart();
+      if(bankFrom!==need){ toast(`Periods must run one after another — the next period starts on ${need}. Use “Next unverified period”.`, true); return; }
+      const stmt=Number(q('bkStmt').value); if(isNaN(stmt)){ toast('Enter the statement balance.', true); return; }
+      const rec={id:uid(), from:bankFrom, to:bankTo, opening:L.opening, booksClosing:L.closing, statementBalance:stmt, difference:round2(stmt-L.closing), note:q('bkNote').value||'', verifiedBy:(SESSION&&SESSION.name)||'', verifiedAt:new Date().toISOString(), totIn:L.totIn, totOut:L.totOut, entries:L.rows.length};
+      tagRecord(rec,true); BANK_RECONS.push(rec); await saveBankRecons(); toast('Period verified and locked.'); bankFrom=''; render(); };
+    c.querySelectorAll('[data-unlock]').forEach(b=>b.onclick=async()=>{ const r=BANK_RECONS.find(x=>x.id===b.dataset.unlock); if(!r) return; r.unlocked=true; tagRecord(r,false); await saveBankRecons(); bankFrom=''; render(); });
+  }
+}
+function bankLedgerPdf(L){
+  const rows = L.rows.map(r=>`<tr><td class="val">${esc(r.date)}</td><td class="val">${esc(r.desc)}${r.assumed?' *':''}</td><td class="val">${esc(r.src)}</td><td class="val amtcell">${r.dir==='in'?money2(r.amount):''}</td><td class="val amtcell">${r.dir==='out'?money2(r.amount):''}</td><td class="val amtcell">${money2(r.balance)}</td></tr>`).join('');
+  printModalDoc('Bank ledger', `<div class="payslip-title">BANK LEDGER — ${esc(bankFrom)} TO ${esc(bankTo)}</div>
+   <p style="font-size:11px;">${esc(ORG.bankName||'')} ${esc(ORG.bankAccNo||'')}</p>
+   <table class="pstable items-table"><tr class="earnhead"><td>DATE</td><td>PARTICULARS</td><td>TYPE</td><td class="amtcell">RECEIVED</td><td class="amtcell">PAID</td><td class="amtcell">BALANCE</td></tr>
+   <tr><td class="val"></td><td class="val" colspan="4"><i>Opening balance</i></td><td class="val amtcell">${money2(L.opening)}</td></tr>${rows}
+   <tr class="totrow"><td colspan="3">TOTAL / CLOSING</td><td class="amtcell">${money2(L.totIn)}</td><td class="amtcell">${money2(L.totOut)}</td><td class="amtcell">${money2(L.closing)}</td></tr></table>
+   <div class="regime-note">* date assumed (no payment date recorded). Received = invoice payments net of client TDS and credit notes, plus other income. Paid = bill, statutory and salary payments.</div>`);
+}
+
 function renderTaxCompliance(c, actions){
   actions.innerHTML = '';
   const d = taxComplianceData(taxComplianceYear, taxComplianceMonth);
   const pf = pfLiabilityData(taxComplianceYear, taxComplianceMonth);
+  const esic = esicLiabilityData(taxComplianceYear, taxComplianceMonth);
   const monthLabel = new Date(taxComplianceYear, taxComplianceMonth-1, 1).toLocaleString('en-IN',{month:'short'});
   const monthLong = new Date(taxComplianceYear, taxComplianceMonth-1, 1).toLocaleString('en-IN',{month:'long'});
   const deadlineLabel = d.deadline.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
@@ -5056,10 +5687,18 @@ function renderTaxCompliance(c, actions){
         </tr>
       </tbody></table>
       </div>
+      ${(pf.totals.adminShortfall||pf.totals.edliShortfall)?`<p class="hint" style="margin-top:8px;">ℹ️ EPFO minimum ₹500 applied: ${pf.totals.adminShortfall?`Admin charges topped up by ${money2(pf.totals.adminShortfall)}. `:''}${pf.totals.edliShortfall?`EDLI topped up by ${money2(pf.totals.edliShortfall)}.`:''} (Shown in the totals row only.)</p>`:''}
       <p class="hint" style="margin-top:8px;">${pfBillExists ? '✓ A PF payable bill has already been recorded for this period.' : `No PF payment bill recorded for ${esc(monthLong)} ${taxComplianceYear}. Click "+ Generate PF Payable Bill" above to create one (it'll appear in the next Payment Request).`}</p>
       ` : `<div class="empty" style="margin-top:10px;">No payslips with PF this period — generate this month's payslips first.</div>`}
     </div>
+    ${statutoryCardHtml(d, pf, esic, taxComplianceYear, taxComplianceMonth)}
+    ${gstPanelHtml(taxComplianceYear, taxComplianceMonth)}
+    ${complianceChecklistHtml(taxComplianceYear, taxComplianceMonth)}
+    ${auditCardHtml(taxComplianceYear+'-'+String(taxComplianceMonth).padStart(2,'0'))}
   `;
+  bindGstPanel(c);
+  bindStatutory(c, d, pf, esic);
+  bindAuditCard(c, taxComplianceYear+'-'+String(taxComplianceMonth).padStart(2,'0'));
   document.getElementById('tcMonth').onchange = (e)=>{ taxComplianceMonth = Number(e.target.value); renderTaxCompliance(c, actions); };
   document.getElementById('tcYear').onchange = (e)=>{ taxComplianceYear = Number(e.target.value); renderTaxCompliance(c, actions); };
   document.getElementById('tcTdsPdf').onclick = ()=> printTaxComplianceReport('tds', d, monthLong);
@@ -5076,7 +5715,7 @@ async function generatePfPayableBill(pf, monthLong){
   }
   const rec = {
     id: uid(), billType:'STATUTORY', statutoryType:'PF', statutoryAmount: pf.totals.total,
-    billDate: pf.period+'-01', dueDate: pf.deadline.toISOString().slice(0,10),
+    billDate: pf.period+'-01', dueDate: localYmd(pf.deadline),
     description: `EPF contribution (Employee+Employer+Admin+EDLI) for ${monthLong}`,
     category:'Statutory', paidAmount:0, paymentMode:'', notes:`Auto-generated from Tax Compliance — ${pf.rows.length} staff.`
   };
@@ -5093,11 +5732,13 @@ function exportPfEcr(pf, monthLong){
   // UAN#~#Name#~#GrossWages#~#EPFWages#~#EPSWages#~#EDLIWages#~#EPFContribution#~#EPSContribution#~#EPFEPSDiff#~#NCPDays#~#RefundAdvance
   const lines = pf.rows.map(r=>{
     const wageCap = pfWageCapFor(pf.period);
-    const epsWages = Math.min(r.pfWages, wageCap);
-    const epsContribution = round2(epsWages*0.0833); // 8.33% of the employer's 12% goes to EPS, capped at the EPF wage ceiling
-    const epfEpsDiff = round2(r.pfEmployer - epsContribution);
-    return [r.uan||'', r.name, r.pfWages.toFixed(2), Math.min(r.pfWages,wageCap).toFixed(2), epsWages.toFixed(2), Math.min(r.pfWages,wageCap).toFixed(2),
-      r.pfEmployee.toFixed(2), epsContribution.toFixed(2), epfEpsDiff.toFixed(2), '0', '0.00'].join('#~#');
+    // Members who joined on/after 1 Sep 2014 with PF wages above the ceiling are not EPS members: EPF only.
+    const epsExempt = !!r.doj && r.doj >= '2014-09-01' && r.pfWages > wageCap;
+    const epsWages = epsExempt ? 0 : Math.min(r.pfWages, wageCap);
+    const epsContribution = epsExempt ? 0 : Math.round(epsWages*0.0833); // 8.33% of wages up to the ceiling goes to EPS
+    const epfEpsDiff = Math.round(r.pfEmployer - epsContribution);
+    return [r.uan||'', r.name, String(r.pfWages), String(Math.min(r.pfWages,wageCap)), String(epsWages), String(Math.min(r.pfWages,wageCap)),
+      String(r.pfEmployee), String(epsContribution), String(epfEpsDiff), '0', '0'].join('#~#');
   });
   const content = lines.join('\r\n');
   const blob = new Blob([content], {type:'text/plain'});
@@ -5612,6 +6253,7 @@ function openExpenseForm(expId){
   });
   ['expBillAmount','expExchRate','expGstMode','expGstPct','expRcmRate','expRcmSupply','expTdsRate','expPaidAmount','expPF','expPT','expESIC','expOtherDed','expStatutoryAmount','expTransferAmount','expCgstOverride','expSgstOverride','expIgstOverride','expCreditNote'].forEach(id=> document.getElementById(id).addEventListener('input', drawTotalsPreview));
   document.getElementById('expTdsRate').addEventListener('input', ()=>{ document.getElementById('expTdsFlatAmount').value = ''; });
+  autoPickGstMode('expVendorSel','expGstMode');
   const vendorSel = document.getElementById('expVendorSel');
   if(vendorSel) vendorSel.addEventListener('change', ()=>{
     const vendor = PARTIES.find(p=>p.id===vendorSel.value);
