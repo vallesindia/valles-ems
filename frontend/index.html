@@ -5498,16 +5498,18 @@ function renderBank(c, actions){
   const view = r=> bankView==='all' || (bankView==='in'&&r.dir==='in') || (bankView==='out'&&r.dir==='out');
   c.innerHTML = `
    <div class="card">
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
-      <div class="field"><label>Account</label><select id="bkAcct">${bankAcctOptions(bankAcct,true)}</select></div>
-      <div class="field"><label>From</label><input type="date" id="bkFrom" value="${bankFrom}"></div>
-      <div class="field"><label>To</label><input type="date" id="bkTo" value="${bankTo}"></div>
-      <div class="field"><label>Show</label><select id="bkView"><option value="all" ${bankView==='all'?'selected':''}>All</option><option value="in" ${bankView==='in'?'selected':''}>Income (received)</option><option value="out" ${bankView==='out'?'selected':''}>Spending (paid)</option></select></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end;">
+      <div class="field" style="margin:0;"><label>Account</label><select id="bkAcct">${bankAcctOptions(bankAcct,true)}</select></div>
+      <div class="field" style="margin:0;"><label>From</label><input type="date" id="bkFrom" value="${bankFrom}"></div>
+      <div class="field" style="margin:0;"><label>To</label><input type="date" id="bkTo" value="${bankTo}"></div>
+      <div class="field" style="margin:0;"><label>Show</label><select id="bkView"><option value="all" ${bankView==='all'?'selected':''}>All</option><option value="in" ${bankView==='in'?'selected':''}>Income (received)</option><option value="out" ${bankView==='out'?'selected':''}>Spending (paid)</option></select></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--rule);">
       <button class="btn secondary sm" id="bkNext">Next unverified period</button>
       <button class="btn secondary sm" id="bkPdf">📄 Ledger PDF</button>
-      ${ed?`<span style="margin-left:auto;">Bank start date <input id="bkStartDate" type="date" value="${bankStart()}" style="padding:6px;border:1px solid var(--rule);border-radius:8px;"> <button class="btn secondary sm" id="bkOpenSave">Save</button> <button class="btn secondary sm" id="bkAccts">🏦 Manage accounts</button></span>`:''}
+      ${ed?`<span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><span style="font-size:12px;color:var(--muted);">Bank start date</span><input id="bkStartDate" type="date" value="${bankStart()}" style="width:auto;padding:6px 8px;border:1px solid var(--rule);border-radius:8px;"><button class="btn secondary sm" id="bkOpenSave">Save</button><button class="btn secondary sm" id="bkAccts">🏦 Manage accounts</button></span>`:''}
     </div>
-    <div class="grid cols-4" style="gap:12px;margin-top:12px;">
+    <div class="grid cols-4" style="gap:12px;margin-top:16px;">
       <div class="stat" style="background:var(--g-blue);"><div class="n">${money(L.opening)}</div><div class="l">Opening${L.openingVerified?' (verified '+esc(L.openingVerified.to)+')':''}</div></div>
       <div class="stat" style="background:var(--g-green);"><div class="n">${money(L.totIn)}</div><div class="l">Income received${specific?'':' (excl. own transfers)'}</div></div>
       <div class="stat" style="background:var(--g-red);"><div class="n">${money(L.totOut)}</div><div class="l">Spending paid${specific?'':' (excl. own transfers)'}</div></div>
