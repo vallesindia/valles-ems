@@ -5693,7 +5693,7 @@ function openSplitCalculator(){
   const now=new Date(); const last=new Date(now.getFullYear(), now.getMonth()-1, 1);
   const SC={ period:last.getFullYear()+'-'+String(last.getMonth()+1).padStart(2,'0') };
   const cfg=()=>Object.assign({gstPct:18, sac:'998393', agreement:'1st April 2023'}, ORG.splitCfg||{});
-  let vessels=(ORG.vessels||[]).map(v=>Object.assign({},v));
+  let vessels=(ORG.splitVessels||(ORG.vessels||[]).map((n,i)=>({id:'v-'+i,name:String(n),flag:''}))).map(v=>Object.assign({},v));   // never touches ORG.vessels (plain names used by the existing invoice generators)
   let inputs={}, pfSel={}, totalOverride='', rateOverride='';
   const monthDays=()=>{ const [y,m]=SC.period.split('-').map(Number); return new Date(y,m,0).getDate(); };
   const loadMonth=()=>{ const saved=(ORG.splitInputs&&ORG.splitInputs[SC.period])||{}; inputs=JSON.parse(JSON.stringify(saved.v||{})); totalOverride=saved.total||''; rateOverride=saved.rate||''; pfSel={}; };
@@ -5747,7 +5747,7 @@ function openSplitCalculator(){
     q('#scAllIn').onclick=()=>{ Object.keys(inputs).forEach(k=>{ inputs[k].india=0; }); draw(); };
     if(ed){
       q('#scAddV').onclick=()=>{ vessels.push({id:'v-'+uid(), name:'', flag:''}); draw(); };
-      q('#scSave').onclick=async()=>{ ORG.vessels=vessels.filter(v=>(v.name||'').trim()).map(v=>({id:v.id,name:v.name.trim(),flag:(v.flag||'').trim()})); ORG.splitInputs=ORG.splitInputs||{}; ORG.splitInputs[SC.period]={v:inputs,total:totalOverride,rate:rateOverride}; ORG.splitCfg=cfg(); await saveOrg(); toast('Saved.'); };
+      q('#scSave').onclick=async()=>{ ORG.splitVessels=vessels.filter(v=>(v.name||'').trim()).map(v=>({id:v.id,name:v.name.trim(),flag:(v.flag||'').trim()})); ORG.splitInputs=ORG.splitInputs||{}; ORG.splitInputs[SC.period]={v:inputs,total:totalOverride,rate:rateOverride}; ORG.splitCfg=cfg(); await saveOrg(); toast('Saved.'); };
       q('#scAddRate').onclick=()=>{ ORG.techRates=splitRateHistory().concat([{from:new Date().toISOString().slice(0,10),rate:0}]); draw(); };
       qa('[data-rf]').forEach(el=>el.onchange=()=>{ const l=splitRateHistory(); l[+el.dataset.i][el.dataset.rf]= el.dataset.rf==='rate'?(Number(el.value)||0):el.value; ORG.techRates=l; });
       qa('[data-rdel]').forEach(b=>b.onclick=()=>{ const l=splitRateHistory(); if(l.length<2){ toast('Keep at least one rate.', true); return; } l.splice(+b.dataset.rdel,1); ORG.techRates=l; draw(); });
