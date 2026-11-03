@@ -3831,8 +3831,8 @@ function openTxnForm(txnId, prefill){
       <div id="lineItemsWrap"></div>
       <div class="grid cols-4" style="margin-top:10px;">
         <div class="field"><label>Other Charges (optional)</label><input type="number" step="0.01" name="otherCharges" id="txnOtherCharges" value="${t.otherCharges||0}"></div>
-        <div class="field"><label>Other Charges GST %</label><input type="number" min="0" step="0.01" name="otherChargesGstPct" id="txnOtherChargesGst" value="${t.otherChargesGstPct||0}"></div>
-        <div class="field"><label>Round Off (+/−)</label><input type="number" step="0.01" name="roundOff" id="txnRoundOff" value="${t.roundOff||0}"></div>
+        <div class="field"><label>Other Charges GST %</label><input type="number" min="0" step="any" name="otherChargesGstPct" id="txnOtherChargesGst" value="${t.otherChargesGstPct||0}"></div>
+        <div class="field"><label>Round Off (+/−)</label><input type="number" step="any" name="roundOff" id="txnRoundOff" value="${t.roundOff||0}"></div>
         <div class="field"><label>&nbsp;</label><button type="button" class="btn secondary sm" id="txnAutoRound" title="Round the grand total to a whole number">Auto round off</button></div>
       </div>
       <div id="txnTotalsPreview"></div>
@@ -4069,7 +4069,7 @@ async function submitTxnForm(ev, isEdit, t){
     fundReceivedAmount: fd.get('fundReceivedAmount')!==null ? (Number(fd.get('fundReceivedAmount'))||0) : (t.fundReceivedAmount||''),
     fundReceivedDate: fd.get('fundReceivedDate')||t.fundReceivedDate||'', fundReceivedVia: (fd.get('fundReceivedVia')||t.fundReceivedVia||'').trim(),
     linkedInvoice: t.linkedInvoice||'', linkedProforma: t.linkedProforma||'',
-    linkedInvoiceGST: t.linkedInvoiceGST||'', linkedInvoiceNonGST: t.linkedInvoiceNonGST||'', linkedProformas: t.linkedProformas||[],
+    linkedInvoiceGST: t.linkedInvoiceGST||'', linkedInvoiceNonGST: t.linkedInvoiceNonGST||'', linkedProformas: t.linkedProformas||[], splitKind: t.splitKind||'', splitNeeds: t.splitNeeds||'',
     otherCharges: Number(fd.get('otherCharges'))||0, otherChargesGstPct: Number(fd.get('otherChargesGstPct'))||0, roundOff: Number(fd.get('roundOff'))||0,
     terms: fd.get('terms').trim(), notes: fd.get('notes').trim(), items,
     revisionNo: t.revisionNo||0, revisionHistory: t.revisionHistory||[]
@@ -4088,6 +4088,16 @@ async function submitTxnForm(ev, isEdit, t){
     rec.txnNo = nextTxnNo(rec.txnCategory);
     await saveOrg();
   }
+  // A proforma can only ever be converted once: once any invoice copy of it has been SAVED, a second copy is refused
+  // (an unsaved draft stays editable and does not block anything).
+  if(!isEdit){
+    const srcNos = rec.linkedProforma ? [rec.linkedProforma] : (rec.splitKind ? (rec.linkedProformas||[]) : []);
+    for(const no of srcNos){
+      const pi = TRANSACTIONS.find(x=> x.txnCategory==='PROFORMA' && x.txnNo===no); if(!pi) continue;
+      const used = pi.linkedInvoice || (rec.splitKind==='EXPORT' ? pi.linkedInvoiceNonGST : rec.splitKind==='GST' ? pi.linkedInvoiceGST : (pi.linkedInvoiceNonGST||pi.linkedInvoiceGST));
+      if(used){ toast(`Proforma ${no} has already been converted (${used}). It cannot be converted twice — delete that invoice first if it was a mistake.`, true); return; }
+    }
+  }
   tagRecord(rec, !isEdit);
   if(isEdit){ const idx = TRANSACTIONS.findIndex(x=>x.id===t.id); TRANSACTIONS[idx]=rec; } else { TRANSACTIONS.push(rec); }
   // Converting a Proforma Invoice: once the resulting Invoice is actually saved (and so has
@@ -4096,6 +4106,13 @@ async function submitTxnForm(ev, isEdit, t){
   if(!isEdit && rec.linkedProforma){
     const pi = TRANSACTIONS.find(x=> x.txnCategory==='PROFORMA' && x.txnNo===rec.linkedProforma);
     if(pi){ pi.linkedInvoice = rec.txnNo; pi.status = 'Converted'; tagRecord(pi, false); }
+  }
+  if(!isEdit && rec.splitKind && (rec.linkedProformas||[]).length){
+    rec.linkedProformas.forEach(no=>{ const pi=TRANSACTIONS.find(x=> x.txnCategory==='PROFORMA' && x.txnNo===no); if(!pi) return;
+      if(rec.splitKind==='GST') pi.linkedInvoiceGST=rec.txnNo; else pi.linkedInvoiceNonGST=rec.txnNo;
+      // fully converted only once every invoice this month needs exists (export alone, or export + GST)
+      if(rec.splitNeeds!=='BOTH' || (pi.linkedInvoiceGST && pi.linkedInvoiceNonGST)) pi.status='Converted';
+      tagRecord(pi,false); });
   }
   await saveTransactions();
   const savedAsRevision = isEdit && rec.revisionNo > (t.revisionNo||0);
@@ -5688,29 +5705,89 @@ function splitCsv(R, SC){
     L.gst.forEach(r=>rows.push([r.sno,r.desc.replace(/\n/g,' '),r.sac,r.qty,r.uom,r.rate,r.taxable,r.igst,rup2(r.taxable+r.igst)])); rows.push(['','','','','','Invoice total',R.gstTaxable,R.gstIgst,R.gstTotal]); }
   csvDownload(`Split_${SC.period}.csv`, rows);
 }
+/* Vessel master: type each vessel once; the calculator picks from this list. */
+function splitMaster(){ return (ORG.splitVessels || (ORG.vessels||[]).map((n,i)=>({id:'v-'+i,name:String(n),flag:''}))).map(v=>Object.assign({},v)); }
+function openVesselMasterModal(onDone){
+  const rows = splitMaster();
+  const ed = canEdit();
+  const draw=()=>{
+    document.getElementById('modalBox').innerHTML = `<div class="modal-head"><h3>🚢 Vessels</h3><button class="modal-close" id="mClose">✕</button></div>
+     <p class="hint">Type each vessel once. The Export/GST split calculator picks from this list.</p>
+     <table><thead><tr><th>Vessel name</th><th>Flag</th>${ed?'<th></th>':''}</tr></thead><tbody>
+     ${rows.map((v,i)=>`<tr><td><input data-f="name" data-i="${i}" value="${esc(v.name||'')}" style="width:100%" ${ed?'':'readonly'}></td><td><input data-f="flag" data-i="${i}" value="${esc(v.flag||'')}" style="width:100%" ${ed?'':'readonly'}></td>${ed?`<td><button class="btn danger sm" data-del="${i}">✕</button></td>`:''}</tr>`).join('')||'<tr><td colspan="3"><div class="empty">No vessels yet.</div></td></tr>'}</tbody></table>
+     <div class="btn-row">${ed?'<button class="btn secondary" id="vmAdd">+ Add vessel</button><button class="btn" id="vmSave">Save</button>':''}<button class="btn secondary" id="mCancel">Close</button></div>`;
+    const sync=()=>document.querySelectorAll('#modalBox [data-f]').forEach(el=>{ rows[+el.dataset.i][el.dataset.f]=el.value; });
+    document.getElementById('mClose').onclick=()=>{ closeModal(); if(onDone) onDone(); }; document.getElementById('mCancel').onclick=document.getElementById('mClose').onclick;
+    if(!ed) return;
+    document.getElementById('vmAdd').onclick=()=>{ sync(); rows.push({id:'v-'+uid(), name:'', flag:''}); draw(); };
+    document.querySelectorAll('#modalBox [data-del]').forEach(b=>b.onclick=()=>{ sync(); rows.splice(+b.dataset.del,1); draw(); });
+    document.getElementById('vmSave').onclick=async()=>{ sync();
+      const clean=rows.filter(v=>(v.name||'').trim()).map(v=>({id:v.id,name:v.name.trim(),flag:(v.flag||'').trim()}));
+      const names=clean.map(v=>v.name.toLowerCase()); if(new Set(names).size!==names.length){ toast('Vessel names must be different.', true); return; }
+      ORG.splitVessels=clean;
+      ORG.vessels=(ORG.vessels||[]).concat(clean.map(v=>v.name).filter(n=>!(ORG.vessels||[]).includes(n)));   // keeps the existing invoice generators' name suggestions in step
+      await saveOrg(); toast('Vessels saved.'); closeModal(); if(onDone) onDone(); };
+  };
+  openModal(''); draw();
+}
+/* Prefill for the existing New Invoice form — nothing is saved until the user saves that form. */
+function splitDraftPrefill(kind, R, SC, pis){
+  const ml=splitMonthLabel(SC.period), cfg=Object.assign({sac:'998393',agreement:'1st April 2023'},ORG.splitCfg||{}), sac=cfg.sac, agr=cfg.agreement;
+  const items=[]; const li=(o)=>Object.assign({id:uid(),hsn:sac,discountPct:0},o);
+  let gstMode, tax;
+  if(kind==='EXPORT'){
+    gstMode='None'; tax=0;
+    items.push({id:uid(),kind:'heading',description:`Technical services fee / for the month of ${ml} for following vessels, as per Agreement dated ${agr} when services were delivered on board when vessel outside of India:`});
+    R.vs.filter(v=>v.foreign>0).forEach(v=>items.push(li({description:`VESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, qty:v.foreign, uom:'Days / Vessel', rate:R.rate, gstPct:0})));
+    if(R.expOther>0 || !R.hasGst){
+      items.push({id:uid(),kind:'heading',description:'Other services'});
+      items.push(li({description:`Other services towards system improvement design, modification and maintenance carried out, For the ${R.vs.length} nos ships, for other associated technical support carried out when ship is outside India, when services were delivered on board.`, qty:1, uom:'Month', rate:R.expOther, gstPct:0}));
+    }
+  } else {
+    gstMode='Inter'; tax=R.g*100;
+    R.vs.filter(v=>v.india>0).forEach(v=>{
+      items.push({id:uid(),kind:'heading',description:`Technical services fee for the period${v.period?'\n'+v.period:''}${v.port?'\nPort name : '+v.port:''}\nfor the days in ${ml} for below vessel as per Agreement dated ${agr}, during the period this ship was in India.`});
+      items.push(li({description:`VESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, qty:v.india, uom:'Days', rate:R.rate, gstPct:tax}));
+    });
+    items.push({id:uid(),kind:'heading',description:'Other services'});
+    items.push(li({description:`Other services towards system improvement design, modification and maintenance carried out, For ${R.vs.filter(v=>v.india>0).length} ship(s), for other associated technical support when ship is in India.`, qty:R.vdIndia, uom:'Days', rate:R.perDay, gstPct:tax}));
+  }
+  const first=pis[0]||{};
+  const probe=calcTxnTotals({items, gstMode, exchRate:1});
+  const target = kind==='EXPORT' ? R.expTotal : R.gstTotal;
+  const roundOff = Number((target - probe.grandTotal).toFixed(4));
+  return { txnCategory:'INVOICE', txnDirection:first.txnDirection||'Outgoing', partyId:first.partyId||'', txnDate:new Date().toISOString().slice(0,10), dueDate:'',
+    referenceType:'Ref Proforma Invoice No', reference:pis.map(p=>p.txnNo).join(', '), subject:first.subject||'', status:'Draft', gstMode,
+    currency:first.currency||'USD', exchRate:first.exchRate||1, items, roundOff: Math.abs(roundOff)>0.0001?roundOff:0,
+    notes:`Prepared from ${pis.map(p=>p.txnNo).join(', ')} using the Export/GST split calculator (${ml}). Check the exchange rate before saving.`,
+    linkedProformas:pis.map(p=>p.txnNo), linkedProforma:'', splitKind:kind, splitNeeds:R.hasGst?'BOTH':'EXPORT' };
+}
 function openSplitCalculator(){
   const ed=canEdit();
   const now=new Date(); const last=new Date(now.getFullYear(), now.getMonth()-1, 1);
   const SC={ period:last.getFullYear()+'-'+String(last.getMonth()+1).padStart(2,'0') };
   const cfg=()=>Object.assign({gstPct:18, sac:'998393', agreement:'1st April 2023'}, ORG.splitCfg||{});
-  let vessels=(ORG.splitVessels||(ORG.vessels||[]).map((n,i)=>({id:'v-'+i,name:String(n),flag:''}))).map(v=>Object.assign({},v));   // never touches ORG.vessels (plain names used by the existing invoice generators)
-  let inputs={}, pfSel={}, totalOverride='', rateOverride='';
+  let inputs={}, pfSel={}, totalOverride='', rateOverride='', rowIds=[];
   const monthDays=()=>{ const [y,m]=SC.period.split('-').map(Number); return new Date(y,m,0).getDate(); };
-  const loadMonth=()=>{ const saved=(ORG.splitInputs&&ORG.splitInputs[SC.period])||{}; inputs=JSON.parse(JSON.stringify(saved.v||{})); totalOverride=saved.total||''; rateOverride=saved.rate||''; pfSel={}; };
+  const loadMonth=()=>{ const saved=(ORG.splitInputs&&ORG.splitInputs[SC.period])||{}; inputs=JSON.parse(JSON.stringify(saved.v||{})); totalOverride=saved.total||''; rateOverride=saved.rate||''; pfSel=Object.assign({},saved.sel||{}); rowIds=saved.rows?saved.rows.slice():splitMaster().map(v=>v.id); };
   const pfList=()=>TRANSACTIONS.filter(t=>t.txnCategory==='PROFORMA' && (t.txnDate||'').slice(0,7)===SC.period);
-  const rateInfo=()=>{ const ms=SC.period+'-01', me=SC.period+'-'+String(monthDays()).padStart(2,'0'); const r=splitRateFor(ms); const mid=splitRateHistory().filter(x=>x.from>ms && x.from<=me); return {r, mid}; };
+  const rateInfo=()=>{ const ms=SC.period+'-01', me=SC.period+'-'+String(monthDays()).padStart(2,'0'); return {r:splitRateFor(ms), mid:splitRateHistory().filter(x=>x.from>ms && x.from<=me)}; };
+  const persist=async()=>{ ORG.splitInputs=ORG.splitInputs||{}; ORG.splitInputs[SC.period]={v:inputs,total:totalOverride,rate:rateOverride,sel:pfSel,rows:rowIds}; ORG.splitCfg=cfg(); await saveOrg(); };
   loadMonth();
   const draw=()=>{
-    const c=cfg(), md=monthDays(), pl=pfList(), ri=rateInfo();
-    pl.forEach(t=>{ if(pfSel[t.id]===undefined) pfSel[t.id]=true; });
+    const c=cfg(), md=monthDays(), pl=pfList(), ri=rateInfo(), master=splitMaster();
+    pl.forEach(t=>{ if(pfSel[t.id]===undefined) pfSel[t.id]=!(t.linkedInvoice); });
     const pfTotal=rup2(pl.filter(t=>pfSel[t.id]).reduce((s,t)=>s+calcTxnTotals(t).grandTotal,0));
-    const vinOf=()=> vessels.map(v=>{ const i=inputs[v.id]||{}; return {id:v.id,name:v.name,flag:v.flag, managed:i.managed!==undefined&&i.managed!==''?Number(i.managed):md, india:Number(i.india)||0, period:i.period||'', port:i.port||''}; });
+    const rowsV=rowIds.map(id=>master.find(v=>v.id===id)).filter(Boolean);
+    const vinOf=()=> rowsV.map(v=>{ const i=inputs[v.id]||{}; return {id:v.id,name:v.name,flag:v.flag, managed:i.managed!==undefined&&i.managed!==''?Number(i.managed):md, india:Number(i.india)||0, period:i.period||'', port:i.port||''}; });
     const calcR=()=> splitCalc({ total: totalOverride!=='' ? Number(totalOverride) : pfTotal, rate: rateOverride!=='' ? Number(rateOverride) : ri.r, gstPct:cfg().gstPct, vessels:vinOf() });
     const vin=vinOf(); let R=calcR();
-    const refreshOut=()=>{ R=calcR(); const o=document.querySelector('#modalBox #scOut'); if(o) o.innerHTML=splitResultHtml(R,{period:SC.period}); };
+    const refreshOut=()=>{ R=calcR(); const o=document.querySelector('#modalBox #scOut'); if(o) o.innerHTML=splitResultHtml(R,{period:SC.period}); const g=document.querySelector('#modalBox #scDraftGst'); if(g) g.style.display=R.hasGst?'':'none'; };
     const curr=[...new Set(pl.filter(t=>pfSel[t.id]).map(t=>t.currency||'INR'))];
+    const avail=master.filter(v=>!rowIds.includes(v.id));
+    const linkTxt=t=>{ const l=[t.linkedInvoice&&('invoice '+t.linkedInvoice), t.linkedInvoiceNonGST&&('export '+t.linkedInvoiceNonGST), t.linkedInvoiceGST&&('GST '+t.linkedInvoiceGST)].filter(Boolean); return l.length?` <span class="pill good">already invoiced: ${esc(l.join(', '))}</span>`:''; };
     openModal(`<div class="modal-head"><h3>🧮 Export / GST split calculator</h3><button class="modal-close" id="mClose">✕</button></div>
-     <p class="hint">Calculation only — no invoice is created or changed. Copy the figures into your invoices.</p>
+     <p class="hint">Works out the split. Nothing is saved until you save the invoice draft it opens.</p>
      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end;">
        <div class="field" style="margin:0;"><label>Service month</label><input type="month" id="scMonth" value="${SC.period}"></div>
        <div class="field" style="margin:0;"><label>Tech support rate $/vessel/day</label><input type="number" step="0.01" id="scRate" value="${rateOverride!==''?rateOverride:ri.r}"></div>
@@ -5720,38 +5797,54 @@ function openSplitCalculator(){
      ${ri.mid.length?`<div class="pill warn" style="display:block;margin:8px 0;white-space:normal;">⚠ The rate changes on ${esc(ri.mid.map(x=>x.from+' to $'+x.rate).join(', '))} during this month. The calculator uses $${ri.r} for the whole month — type the correct rate above if the days need splitting.</div>`:''}
      ${curr.some(x=>x!=='USD')?`<div class="pill warn" style="display:block;margin:8px 0;white-space:normal;">⚠ A selected proforma is not in USD (${esc(curr.join(', '))}).</div>`:''}
      <div style="margin:10px 0;"><b style="font-size:13px;">Proformas dated in ${esc(splitMonthLabel(SC.period))}</b> <span class="hint">(max 3 per month${pl.length>3?' — there are '+pl.length+'!':''})</span>
-       ${pl.map(t=>`<label style="display:flex;gap:8px;align-items:center;padding:2px 0;"><input type="checkbox" data-pf="${esc(t.id)}" ${pfSel[t.id]?'checked':''}> ${esc(t.txnNo||'')} — ${esc(t.partyName||'')} · ${esc(t.txnDate||'')} · ${t.currency||''} ${moneyPlain2(calcTxnTotals(t).grandTotal)}</label>`).join('')||'<div class="hint">No proformas this month — type the total above.</div>'}</div>
-     <div style="overflow-x:auto;"><table><thead><tr><th>Vessel</th><th>Flag</th><th class="num-cell">Days managed</th><th class="num-cell">Days in India</th><th>India period (optional)</th><th>Port (optional)</th>${ed?'<th></th>':''}</tr></thead><tbody>
-      ${vin.map((v,i)=>`<tr><td><input data-vf="name" data-i="${i}" value="${esc(v.name)}" ${ed?'':'readonly'} style="width:100%;min-width:130px"></td><td><input data-vf="flag" data-i="${i}" value="${esc(v.flag||'')}" ${ed?'':'readonly'} style="width:100%;min-width:110px"></td>
+       ${pl.map(t=>`<label style="display:flex;gap:8px;align-items:center;padding:2px 0;flex-wrap:wrap;"><input type="checkbox" data-pf="${esc(t.id)}" ${pfSel[t.id]?'checked':''}> ${esc(t.txnNo||'')} — ${esc(t.partyName||'')} · ${esc(t.txnDate||'')} · ${t.currency||''} ${moneyPlain2(calcTxnTotals(t).grandTotal)}${linkTxt(t)}</label>`).join('')||'<div class="hint">No proformas this month — type the total above.</div>'}</div>
+     <div style="overflow-x:auto;"><table><thead><tr><th>Vessel</th><th>Flag</th><th class="num-cell">Days managed</th><th class="num-cell">Days in India</th><th>India period (optional)</th><th>Port (optional)</th><th></th></tr></thead><tbody>
+      ${vin.map((v,i)=>`<tr><td><b>${esc(v.name)}</b></td><td>${esc(v.flag||'')}</td>
         <td><input type="number" min="0" max="${md}" data-vi="managed" data-i="${i}" value="${v.managed}" style="width:80px"></td><td><input type="number" min="0" step="0.01" data-vi="india" data-i="${i}" value="${v.india}" style="width:80px"></td>
-        <td><input data-vi="period" data-i="${i}" value="${esc(v.period)}" placeholder="From: 01/08/2026 … To: …" style="width:100%;min-width:180px"></td><td><input data-vi="port" data-i="${i}" value="${esc(v.port)}" style="width:110px"></td>${ed?`<td><button class="btn danger sm" data-vdel="${i}">✕</button></td>`:''}</tr>`).join('')||'<tr><td colspan="7"><div class="empty">Add your vessels below.</div></td></tr>'}</tbody></table></div>
-     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;">${ed?`<button class="btn secondary sm" id="scAddV">+ Add vessel</button><button class="btn secondary sm" id="scSave">💾 Save vessels &amp; this month's inputs</button>`:''}<button class="btn secondary sm" id="scAllIn">All vessels abroad (clear India days)</button></div>
+        <td><input data-vi="period" data-i="${i}" value="${esc(v.period)}" placeholder="From: 01/08/2026 … To: …" style="width:100%;min-width:180px"></td><td><input data-vi="port" data-i="${i}" value="${esc(v.port)}" style="width:110px"></td><td><button class="btn danger sm" data-vdel="${i}" title="Remove from this month">✕</button></td></tr>`).join('')||'<tr><td colspan="7"><div class="empty">Pick vessels from the list below.</div></td></tr>'}</tbody></table></div>
+     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;align-items:center;">
+       <select id="scAddSel"><option value="">+ Add vessel…</option>${avail.map(v=>`<option value="${esc(v.id)}">${esc(v.name)}${v.flag?' — '+esc(v.flag):''}</option>`).join('')}</select>
+       ${avail.length?'<button class="btn secondary sm" id="scAddAll">Add all</button>':''}
+       <button class="btn secondary sm" id="scVessels">🚢 Manage vessel list</button>
+       <button class="btn secondary sm" id="scAllIn">All vessels abroad (clear India days)</button>
+       ${ed?'<button class="btn secondary sm" id="scSave">💾 Save this month\'s inputs</button>':''}</div>
      <details style="margin:8px 0;"><summary style="cursor:pointer;font-weight:700;">Agreement rates &amp; invoice text</summary>
        <p class="hint">The rate applies from its effective date. When the agreement changes, add a new row with the implementation date.</p>
        <div id="scRates">${splitRateHistory().map((x,i)=>`<div style="display:flex;gap:8px;align-items:center;margin:3px 0;"><input type="date" data-rf="from" data-i="${i}" value="${esc(x.from)}" ${ed?'':'readonly'}> <input type="number" step="0.01" data-rf="rate" data-i="${i}" value="${x.rate}" style="width:110px" ${ed?'':'readonly'}> $/vessel/day ${ed?`<button class="btn danger sm" data-rdel="${i}">✕</button>`:''}</div>`).join('')}</div>
        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center;">${ed?`<button class="btn secondary sm" id="scAddRate">+ Add rate</button><button class="btn secondary sm" id="scSaveRates">Save rates &amp; text</button>`:''}
          <label>SAC <input id="scSac" value="${esc(c.sac)}" style="width:90px" ${ed?'':'readonly'}></label><label>Agreement dated <input id="scAgr" value="${esc(c.agreement)}" style="width:150px" ${ed?'':'readonly'}></label></div></details>
      <div id="scOut">${splitResultHtml(R,{period:SC.period})}</div>
-     <div class="btn-row"><button class="btn" id="scPrint">🖨️ Print / PDF</button><button class="btn secondary" id="scCsv">📊 CSV</button><button class="btn secondary" id="mCancel">Close</button></div>`, 'xwide');
+     <div class="btn-row" id="scDraftBtns">${ed?`<button class="btn" id="scDraftExp">📝 Create Export invoice draft</button><button class="btn" id="scDraftGst" style="${R.hasGst?'':'display:none;'}">📝 Create GST invoice draft</button>`:''}<button class="btn secondary" id="scPrint">🖨️ Print / PDF</button><button class="btn secondary" id="scCsv">📊 CSV</button><button class="btn secondary" id="mCancel">Close</button></div>`, 'xwide');
     const q=s=>document.querySelector('#modalBox '+s), qa=s=>document.querySelectorAll('#modalBox '+s);
     q('#mClose').onclick=closeModal; q('#mCancel').onclick=closeModal;
-    const rerender=()=>draw();
     q('#scMonth').onchange=e=>{ if(!e.target.value) return; SC.period=e.target.value; loadMonth(); draw(); };
     q('#scRate').onchange=e=>{ rateOverride = (Number(e.target.value)===ri.r)?'':e.target.value; refreshOut(); };
-    q('#scGst').onchange=e=>{ ORG.splitCfg=Object.assign(cfg(),{gstPct:Number(e.target.value)||0}); refreshOut(); };
+    q('#scGst').onchange=e=>{ ORG.splitCfg=Object.assign(cfg(),{gstPct:Number(e.target.value)||0}); draw(); };
     q('#scTotal').onchange=e=>{ totalOverride=(Number(e.target.value)===pfTotal)?'':e.target.value; refreshOut(); };
     qa('[data-pf]').forEach(b=>b.onchange=()=>{ pfSel[b.dataset.pf]=b.checked; totalOverride=''; draw(); });
-    qa('[data-vi]').forEach(el=>el.onchange=()=>{ const v=vessels[+el.dataset.i]; inputs[v.id]=inputs[v.id]||{}; inputs[v.id][el.dataset.vi]=el.value; refreshOut(); });
-    qa('[data-vf]').forEach(el=>el.onchange=()=>{ vessels[+el.dataset.i][el.dataset.vf]=el.value; refreshOut(); });
-    qa('[data-vdel]').forEach(b=>b.onclick=()=>{ vessels.splice(+b.dataset.vdel,1); draw(); });
+    qa('[data-vi]').forEach(el=>el.onchange=()=>{ const v=rowsV[+el.dataset.i]; inputs[v.id]=inputs[v.id]||{}; inputs[v.id][el.dataset.vi]=el.value; refreshOut(); });
+    qa('[data-vdel]').forEach(b=>b.onclick=()=>{ rowIds=rowIds.filter(id=>id!==rowsV[+b.dataset.vdel].id); draw(); });
+    q('#scAddSel').onchange=e=>{ if(e.target.value){ rowIds.push(e.target.value); draw(); } };
+    if(q('#scAddAll')) q('#scAddAll').onclick=()=>{ avail.forEach(v=>rowIds.push(v.id)); draw(); };
+    q('#scVessels').onclick=()=>openVesselMasterModal(()=>{ rowIds=rowIds.filter(id=>splitMaster().some(v=>v.id===id)); draw(); });
     q('#scAllIn').onclick=()=>{ Object.keys(inputs).forEach(k=>{ inputs[k].india=0; }); draw(); };
     if(ed){
-      q('#scAddV').onclick=()=>{ vessels.push({id:'v-'+uid(), name:'', flag:''}); draw(); };
-      q('#scSave').onclick=async()=>{ ORG.splitVessels=vessels.filter(v=>(v.name||'').trim()).map(v=>({id:v.id,name:v.name.trim(),flag:(v.flag||'').trim()})); ORG.splitInputs=ORG.splitInputs||{}; ORG.splitInputs[SC.period]={v:inputs,total:totalOverride,rate:rateOverride}; ORG.splitCfg=cfg(); await saveOrg(); toast('Saved.'); };
+      q('#scSave').onclick=async()=>{ await persist(); toast('Saved.'); };
       q('#scAddRate').onclick=()=>{ ORG.techRates=splitRateHistory().concat([{from:new Date().toISOString().slice(0,10),rate:0}]); draw(); };
       qa('[data-rf]').forEach(el=>el.onchange=()=>{ const l=splitRateHistory(); l[+el.dataset.i][el.dataset.rf]= el.dataset.rf==='rate'?(Number(el.value)||0):el.value; ORG.techRates=l; });
       qa('[data-rdel]').forEach(b=>b.onclick=()=>{ const l=splitRateHistory(); if(l.length<2){ toast('Keep at least one rate.', true); return; } l.splice(+b.dataset.rdel,1); ORG.techRates=l; draw(); });
       q('#scSaveRates').onclick=async()=>{ ORG.splitCfg=Object.assign(cfg(),{sac:q('#scSac').value.trim()||'998393', agreement:q('#scAgr').value.trim()}); ORG.techRates=splitRateHistory(); await saveOrg(); toast('Rates and invoice text saved.'); draw(); };
+      const draft=async kind=>{
+        R=calcR();
+        const pis=pl.filter(t=>pfSel[t.id]);
+        if(!pis.length){ toast('Select at least one proforma — the draft links back to it.', true); return; }
+        if(new Set(pis.map(p=>p.partyId)).size>1){ toast('The selected proformas belong to different parties.', true); return; }
+        if(R.warn.some(w=>/negative/.test(w))){ toast('Fix the warning first — export other services is negative.', true); return; }
+        const dup=pis.find(p=>p.linkedInvoice || (kind==='EXPORT'?p.linkedInvoiceNonGST:p.linkedInvoiceGST));
+        if(dup){ toast(`${dup.txnNo} already has a ${kind==='EXPORT'?'export':'GST'} invoice — a proforma cannot be converted twice.`, true); return; }
+        await persist(); closeModal(); openTxnForm(null, splitDraftPrefill(kind,R,SC,pis)); };
+      q('#scDraftExp').onclick=()=>draft('EXPORT');
+      q('#scDraftGst').onclick=()=>draft('GST');
     }
     q('#scCsv').onclick=()=>{ R=calcR(); splitCsv(R,{period:SC.period}); };
     q('#scPrint').onclick=()=>{ R=calcR(); const h=splitResultHtml(R,{period:SC.period}); printModalDoc('Export / GST split', `<div class="payslip-title">EXPORT / GST SPLIT — ${esc(splitMonthLabel(SC.period)).toUpperCase()}</div><p style="font-size:11px;">Rate $${R.rate}/vessel/day · calculation sheet only</p>${h}`); };
