@@ -5653,7 +5653,8 @@ function splitCalc(o){
     otherIncl = rup2(T - expTech - (gstTechTax+gstTechIgst));
     otherExGst = rup2(otherIncl/(1+g));
     r = vdTotal ? rup2(otherExGst/vdTotal) : 0;
-    gstOtherTax = rup2(r*vdIndia); gstOtherIgst = rup2(gstOtherTax*g);
+    vs.forEach(v=>{ v.gstOtherTax = rup2(r*v.india); v.gstOtherIgst = rup2(v.gstOtherTax*g); });   // other services split per vessel
+    gstOtherTax = rup2(vs.reduce((x,v)=>x+(v.gstOtherTax||0),0)); gstOtherIgst = rup2(vs.reduce((x,v)=>x+(v.gstOtherIgst||0),0));
     expOther = rup2(T - (gstTechTax+gstTechIgst+gstOtherTax+gstOtherIgst) - expTech);
   } else { otherIncl = rup2(T - expTech); expOther = otherIncl; }
   const gstTaxable=rup2(gstTechTax+gstOtherTax), gstIgst=rup2(gstTechIgst+gstOtherIgst), gstTotal=rup2(gstTaxable+gstIgst);
@@ -5672,7 +5673,7 @@ function splitDocLines(R, SC){
   expV.forEach((v,i)=>exp.push({sno:'1.'+String(i+1).padStart(2,'0'), desc:`${i===0?`Technical services fee / for the month of ${ml} for following vessels, as per Agreement dated ${agr} when services were delivered in board when vessel outside of India:\n`:''}VESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, sac, qty:v.foreign, uom:'Days / Vessel', rate:R.rate, taxable:v.expTech, igst:0}));
   if(R.expOther>0 || !R.hasGst) exp.push({sno:'2', desc:`Other services towards system improvement design, modification and maintenance carried out, For the ${R.vs.length} nos ships, for other associated technical support carried out when ship is outside India, when services were delivered on board.`, sac, qty:1, uom:'Month', rate:R.expOther, taxable:R.expOther, igst:0});
   R.vs.filter(v=>v.india>0).forEach((v,i)=>gst.push({sno:String(i+1), desc:`Technical services fee for the period${v.period?'\n'+v.period:''}${v.port?'\nPort name : '+v.port:''}\nfor the days in ${ml} for below vessel as per Agreement dated ${agr}, during the period this ship was in India.\nVESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, sac, qty:v.india, uom:'Days', rate:R.rate, taxable:v.gstTax, igst:v.gstIgst}));
-  if(R.hasGst) gst.push({sno:String(gst.length+1), desc:`Other services towards system improvement design, modification and maintenance carried out, For ${R.vs.filter(v=>v.india>0).length} ship(s), for other associated technical support when ship is in India.`, sac, qty:R.vdIndia, uom:'Days', rate:R.perDay, taxable:R.gstOtherTax, igst:R.gstOtherIgst});
+  if(R.hasGst) R.vs.filter(v=>v.india>0).forEach(v=>gst.push({sno:String(gst.length+1), desc:`Other services towards system improvement design, modification and maintenance carried out, For one ship, for other associated technical support when ship is in India.\nVESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, sac, qty:v.india, uom:'Days', rate:R.perDay, taxable:v.gstOtherTax, igst:v.gstOtherIgst}));
   return {exp, gst};
 }
 function splitResultHtml(R, SC){
@@ -5750,7 +5751,7 @@ function splitDraftPrefill(kind, R, SC, pis){
       items.push(li({description:`VESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, qty:v.india, uom:'Days', rate:R.rate, gstPct:tax}));
     });
     items.push({id:uid(),kind:'heading',description:'Other services'});
-    items.push(li({description:`Other services towards system improvement design, modification and maintenance carried out, For ${R.vs.filter(v=>v.india>0).length} ship(s), for other associated technical support when ship is in India.`, qty:R.vdIndia, uom:'Days', rate:R.perDay, gstPct:tax}));
+    R.vs.filter(v=>v.india>0).forEach(v=>items.push(li({description:`Other services towards system improvement design, modification and maintenance carried out, For one ship, for other associated technical support when ship is in India.\nVESSEL NAME: ${v.name}\nFLAG: ${v.flag||''}`, qty:v.india, uom:'Days', rate:R.perDay, gstPct:tax})));
   }
   const first=pis[0]||{};
   const probe=calcTxnTotals({items, gstMode, exchRate:1});
