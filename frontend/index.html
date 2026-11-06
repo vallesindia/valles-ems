@@ -3682,10 +3682,8 @@ function txnStatusPill(status){
 }
 
 function renderTransactions(c, actions){
-  actions.innerHTML = `<button class="btn secondary" id="exportInvoiceBtn">Generate Monthly Invoice (Export)</button> <button class="btn secondary" id="consolidatePfiBtn">Consolidate Proformas → GST/Non-GST</button> <button class="btn secondary" id="splitCalcBtn">🧮 Export/GST Split Calculator</button> <button class="btn" id="newTxnBtn">+ New Transaction</button>`;
+  actions.innerHTML = `<button class="btn secondary" id="splitCalcBtn" title="Work out the export / GST split of a month's proformas and open the invoice drafts">🧮 Monthly Invoices from Proformas</button> <button class="btn" id="newTxnBtn">+ New Transaction</button>`;
   actions.querySelector('#newTxnBtn').onclick = ()=> openTxnForm();
-  actions.querySelector('#exportInvoiceBtn').onclick = ()=> openExportInvoiceModal();
-  actions.querySelector('#consolidatePfiBtn').onclick = ()=> openConsolidateProformaModal();
   actions.querySelector('#splitCalcBtn').onclick = ()=> openSplitCalculator();
 
   const outstandingInvoices = TRANSACTIONS.filter(t=>t.txnCategory==='INVOICE' && t.status!=='Paid' && t.status!=='Draft');
@@ -3753,7 +3751,7 @@ function renderTransactions(c, actions){
             <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
               <button class="btn secondary sm" data-view="${t.id}">View</button>
               <button class="btn secondary sm" data-edit="${t.id}">Edit</button>
-              ${k==='PROFORMA' && !t.linkedInvoice && !t.linkedInvoiceGST && !t.linkedInvoiceNonGST ? `<button class="btn sm" data-convert="${t.id}">Convert</button>` : ''}
+              
               <button class="btn danger sm" data-del="${t.id}">Delete</button>
             </div>
           </td></tr>`; }).join('')}
@@ -3762,7 +3760,6 @@ function renderTransactions(c, actions){
     }).join('');
     wrap.querySelectorAll('[data-view]').forEach(b=> b.onclick=()=>openTxnPrint(b.dataset.view));
     wrap.querySelectorAll('[data-edit]').forEach(b=> b.onclick=()=>openTxnForm(b.dataset.edit));
-    wrap.querySelectorAll('[data-convert]').forEach(b=> b.onclick=()=>convertToInvoice(b.dataset.convert));
     wrap.querySelectorAll('[data-del]').forEach(b=> b.onclick=()=>deleteTxn(b.dataset.del));
   }
   ['txnSearch','txnCatFilter','txnStatusFilter'].forEach(id=> document.getElementById(id).addEventListener('input', draw));
